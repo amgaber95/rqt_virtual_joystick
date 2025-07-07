@@ -1,0 +1,17 @@
+<library path="src">
+  <class name="VirtualJoystick" type="rqt_virtual_joystick.virtual_joystick.VirtualJoystick" base_class_type="rqt_gui_py::Plugin">
+    <description>
+      Simulate joystick axes and buttons and publish sensor_msgs/Joy messages.
+    </description>
+    <qtgui>
+      <group>
+        <label>Robot Tools</label>
+        <icon type="theme">input-gaming</icon>
+        <statustip>Plugins that emulate robot control hardware.</statustip>
+      </group>
+      <label>Virtual Joystick</label>
+      <icon type="theme">input-gaming</icon>
+      <statustip>Interactively publish synthetic joystick input to /joy or chosen topic.</statustip>
+    </qtgui>
+  </class>
+</library>
