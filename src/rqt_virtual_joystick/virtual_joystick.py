@@ -1,117 +1,70 @@
-"""RQt plugin module wiring the joystick widget into the GUI."""
 
-from __future__ import annotations
-
-from dataclasses import dataclass, replace
-from typing import Optional
-
-from python_qt_binding.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
-from rqt_gui_py.plugin import Plugin
-
-from .widgets import JoystickPosition, JoystickWidget
-
-
-__all__ = ['VirtualJoystick']
-
-
-@dataclass(frozen=True)
-class JoystickState:
-    """Immutable state snapshot for the virtual joystick view."""
-
-    position: JoystickPosition = JoystickPosition(0.0, 0.0)
-
-    def with_position(self, position: JoystickPosition) -> 'JoystickState':
-        """Create a new state reflecting the provided position."""
-
-        return replace(self, position=position)
-
-
-class VirtualJoystickWidget(QWidget):
-    """Composite widget containing the joystick pad and simple controls."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._state = JoystickState()
-
-        self._joystick = JoystickWidget(self)
-        self._joystick.position_changed.connect(self._on_position_changed)
-        self._joystick.interaction_finished.connect(self._on_interaction_finished)
-
-        self._position_label = QLabel('X: 0.00  Y: 0.00', self)
-        self._position_label.setObjectName('JoystickPositionLabel')
-
-        self._reset_button = QPushButton('Reset', self)
-        self._reset_button.clicked.connect(self._joystick.reset)
-
-        self._build_layout()
-        self.setObjectName('VirtualJoystickWidget')
-        self.setWindowTitle('Virtual Joystick')
-
-    def shutdown(self) -> None:
-        """Perform shutdown housekeeping for the widget."""
-
-    def _build_layout(self) -> None:
-        """Assemble the widget layout."""
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 12, 12, 12)
-        main_layout.setSpacing(8)
-
-        main_layout.addWidget(self._joystick, stretch=1)
-
-        controls_layout = QHBoxLayout()
-        controls_layout.setSpacing(8)
-        controls_layout.addWidget(self._position_label)
-        controls_layout.addStretch(1)
-        controls_layout.addWidget(self._reset_button)
-
-        main_layout.addLayout(controls_layout)
-
-    def _on_position_changed(self, x_axis: float, y_axis: float) -> None:
-        """Handle joystick motion updates from the pad."""
-
-        position = JoystickPosition(x=x_axis, y=y_axis)
-        self._state = self._state.with_position(position)
-        self._update_position_readout(position)
-
-    def _on_interaction_finished(self) -> None:
-        """Reset the view when the joystick interaction ends."""
-
-        neutral = JoystickPosition(0.0, 0.0)
-        self._state = self._state.with_position(neutral)
-        self._update_position_readout(neutral)
-
-    def _update_position_readout(self, position: JoystickPosition) -> None:
-        """Update the numeric axis readout label."""
-
-        self._position_label.setText(f'X: {position.x:.2f}  Y: {position.y:.2f}')
-
+from qt_gui.plugin import Plugin
+from .joystick_main_widget import JoystickMainWidget
 
 class VirtualJoystick(Plugin):
-    """Entry point exposing the virtual joystick widget to RQt."""
+    """
+    RQT Plugin for Virtual Joystick.
+    This class serves as the main entry point for the RQT plugin system.
+    
+    Responsibilities:
+    - Plugin initialization and shutdown
+    - Settings persistence (save/restore)
+    - Integration with RQT framework
+    """
 
-    def __init__(self, context) -> None:
+    def __init__(self, context):
+        """
+        Initialize the Virtual Joystick plugin.
+        
+        Args:
+            context: RQT plugin context containing node and UI management
+        """
         super().__init__(context)
         self.setObjectName('VirtualJoystick')
-
-        self._widget = VirtualJoystickWidget()
-        if context.serial_number() > 1:
-            window_title = f'{self._widget.windowTitle()} ({context.serial_number()})'
-            self._widget.setWindowTitle(window_title)
-
+        
+        # Create the main widget - this encapsulates all plugin functionality
+        self._widget = JoystickMainWidget(context.node)
+        
+        # Add widget to RQT interface
         context.add_widget(self._widget)
 
-    def shutdown_plugin(self) -> None:
-        """Handle plugin shutdown by delegating to the widget."""
+    def shutdown_plugin(self):
+        """
+        Clean shutdown of the plugin.
+        
+        This method is called when the plugin is being closed.
+        It ensures proper cleanup of resources.
+        """
+        if hasattr(self, '_widget'):
+            self._widget.shutdown()
 
-        self._widget.shutdown()
+    def save_settings(self, plugin_settings, instance_settings):
+        """
+        Save plugin instance settings.
+        
+        This method is called by RQT to persist plugin configuration
+        between sessions. It delegates to the main widget which knows
+        about all configurable parameters.
+        
+        Args:
+            plugin_settings: Global plugin settings (not used)
+            instance_settings: Instance-specific settings to save to
+        """
+        if hasattr(self, '_widget'):
+            self._widget.save_settings(instance_settings)
 
-    def save_settings(self, plugin_settings, instance_settings) -> None:
-        """Persist plugin configuration (not implemented for the minimal widget)."""
-
-        del plugin_settings, instance_settings
-
-    def restore_settings(self, plugin_settings, instance_settings) -> None:
-        """Restore plugin configuration (not implemented for the minimal widget)."""
-
-        del plugin_settings, instance_settings
+    def restore_settings(self, plugin_settings, instance_settings):
+        """
+        Restore plugin instance settings.
+        
+        This method is called by RQT to restore plugin configuration
+        from previous sessions. It delegates to the main widget which
+        manages all configuration.
+        
+        Args:
+            plugin_settings: Global plugin settings (not used)
+            instance_settings: Instance-specific settings to restore from
+        """
+        if hasattr(self, '_widget'):
+            self._widget.restore_settings(instance_settings)
