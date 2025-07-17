@@ -1,0 +1,390 @@
+import math
+from typing import Tuple
+
+from python_qt_binding.QtCore import Qt, QRect, QSize, QTimer, pyqtSignal, QPoint
+from python_qt_binding.QtGui import (
+    QPainter,
+    QPen,
+    QBrush,
+    QColor,
+    QRadialGradient,
+    QFont,
+)
+from python_qt_binding.QtWidgets import QWidget
+
+from .config_manager import ConfigurationManager
+
+
+class JoystickWidget(QWidget):
+    """Visual joystick widget with mouse and keyboard interaction."""
+
+    position_changed = pyqtSignal(float, float)
+
+    def __init__(self, config_manager: ConfigurationManager, parent=None):
+        super().__init__(parent)
+
+        self._config_manager = config_manager
+        self._position = (0.0, 0.0)
+        self._handle_radius = 12
+        self._pressed = False
+
+        self.setMinimumSize(200, 200)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self._emit_position_if_needed)
+
+        self._config_manager.rate_changed.connect(self._on_rate_changed)
+        self._on_rate_changed(self._config_manager.get_publish_rate())
+
+    def _on_rate_changed(self, rate_hz: float):
+        if rate_hz <= 0:
+            return
+
+        interval_ms = max(1, int(1000.0 / rate_hz))
+        if self._update_timer.isActive():
+            self._update_timer.stop()
+        self._update_timer.setInterval(interval_ms)
+
+    def sizeHint(self) -> QSize:
+        return QSize(250, 250)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        width = self.width()
+        height = self.height()
+        size = min(width, height)
+        center_x = width // 2
+        center_y = height // 2
+        radius = size // 2 - 5
+
+        self._draw_outer_circle(painter, center_x, center_y, radius)
+        self._draw_axes(painter, center_x, center_y, radius)
+        self._draw_polar_grid(painter, center_x, center_y, radius)
+        self._draw_center_marker(painter, center_x, center_y)
+        self._draw_handle(painter, center_x, center_y, radius)
+        self._draw_handle_info(painter)
+
+    def _draw_outer_circle(self, painter: QPainter, center_x: int, center_y: int, radius: int):
+        painter.save()
+
+        gradient = QRadialGradient(center_x, center_y, radius)
+        gradient.setColorAt(0.0, QColor(60, 60, 60))
+        gradient.setColorAt(0.7, QColor(45, 45, 45))
+        gradient.setColorAt(1.0, QColor(30, 30, 30))
+
+        shadow_offset = 3
+        shadow_radius = radius + shadow_offset
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 80)))
+        shadow_rect = QRect(
+            center_x - shadow_radius + shadow_offset,
+            center_y - shadow_radius + shadow_offset,
+            shadow_radius * 2,
+            shadow_radius * 2,
+        )
+        painter.drawEllipse(shadow_rect)
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(QColor(80, 80, 80), 2))
+        outer_rect = QRect(center_x - radius, center_y - radius, radius * 2, radius * 2)
+        painter.drawEllipse(outer_rect)
+
+        highlight_radius = radius - 5
+        painter.setPen(QPen(QColor(100, 100, 100, 100), 1))
+        painter.setBrush(Qt.NoBrush)
+        highlight_rect = QRect(
+            center_x - highlight_radius,
+            center_y - highlight_radius,
+            highlight_radius * 2,
+            highlight_radius * 2,
+        )
+        painter.drawEllipse(highlight_rect)
+
+        painter.restore()
+
+    def _draw_axes(self, painter: QPainter, center_x: int, center_y: int, radius: int):
+        painter.save()
+
+        axis_pen = QPen(QColor(180, 180, 180, 220), 1, Qt.DotLine)
+        painter.setPen(axis_pen)
+        painter.drawLine(center_x - radius + 10, center_y, center_x + radius - 10, center_y)
+        painter.drawLine(center_x, center_y - radius + 10, center_x, center_y + radius - 10)
+
+        tick_pen = QPen(QColor(100, 100, 100, 80), 1)
+        painter.setPen(tick_pen)
+
+        tick_positions = [0.25, 0.5, 0.75]
+        tick_size = 3
+        for pos in tick_positions:
+            tick_x = int(radius * pos)
+            painter.drawLine(center_x + tick_x, center_y - tick_size, center_x + tick_x, center_y + tick_size)
+            painter.drawLine(center_x - tick_x, center_y - tick_size, center_x - tick_x, center_y + tick_size)
+
+            tick_y = int(radius * pos)
+            painter.drawLine(center_x - tick_size, center_y + tick_y, center_x + tick_size, center_y + tick_y)
+            painter.drawLine(center_x - tick_size, center_y - tick_y, center_x + tick_size, center_y - tick_y)
+
+        painter.restore()
+
+    def _draw_polar_grid(self, painter: QPainter, center_x: int, center_y: int, radius: int):
+        painter.save()
+
+        circle_radii = [0.25, 0.5, 0.75]
+        circle_pen = QPen(QColor(120, 120, 120, 200), 1, Qt.DotLine)
+        painter.setPen(circle_pen)
+        painter.setBrush(Qt.NoBrush)
+
+        for ratio in circle_radii:
+            circle_radius = int(radius * ratio)
+            circle_rect = QRect(
+                center_x - circle_radius,
+                center_y - circle_radius,
+                circle_radius * 2,
+                circle_radius * 2,
+            )
+            painter.drawEllipse(circle_rect)
+
+        main_axis_pen = QPen(QColor(140, 140, 140, 180), 1, Qt.DotLine)
+        painter.setPen(main_axis_pen)
+        for angle in [0, 90, 180, 270]:
+            angle_rad = math.radians(angle)
+            start_radius = int(radius * 0.01)
+            start_x = center_x + int(start_radius * math.cos(angle_rad))
+            start_y = center_y - int(start_radius * math.sin(angle_rad))
+            end_radius = int(radius * 0.95)
+            end_x = center_x + int(end_radius * math.cos(angle_rad))
+            end_y = center_y - int(end_radius * math.sin(angle_rad))
+            painter.drawLine(start_x, start_y, end_x, end_y)
+
+        diagonal_pen = QPen(QColor(120, 120, 120, 140), 1, Qt.SolidLine)
+        painter.setPen(diagonal_pen)
+        for angle in [45, 135, 225, 315]:
+            angle_rad = math.radians(angle)
+            start_radius = int(radius * 0.01)
+            start_x = center_x + int(start_radius * math.cos(angle_rad))
+            start_y = center_y - int(start_radius * math.sin(angle_rad))
+            end_radius = int(radius * 0.9)
+            end_x = center_x + int(end_radius * math.cos(angle_rad))
+            end_y = center_y - int(end_radius * math.sin(angle_rad))
+            painter.drawLine(start_x, start_y, end_x, end_y)
+
+        marker_pen = QPen(QColor(140, 140, 140, 120), 2)
+        marker_pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(marker_pen)
+        marker_radius = radius - 8
+        marker_size = 3
+        for angle in [0, 45, 90, 135, 180, 225, 270, 315]:
+            angle_rad = math.radians(angle)
+            marker_x = center_x + int(marker_radius * math.cos(angle_rad))
+            marker_y = center_y - int(marker_radius * math.sin(angle_rad))
+            painter.setBrush(QBrush(QColor(140, 140, 140, 120)))
+            painter.drawEllipse(QPoint(marker_x, marker_y), marker_size, marker_size)
+
+        painter.restore()
+
+    def _draw_center_marker(self, painter: QPainter, center_x: int, center_y: int):
+        painter.save()
+        painter.setPen(QPen(QColor(150, 150, 150), 1))
+        painter.setBrush(QBrush(QColor(80, 80, 80)))
+        painter.drawEllipse(QPoint(center_x, center_y), 4, 4)
+
+        pen = QPen(QColor(160, 160, 160), 2)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(center_x - 8, center_y, center_x - 5, center_y)
+        painter.drawLine(center_x + 5, center_y, center_x + 8, center_y)
+        painter.drawLine(center_x, center_y - 8, center_x, center_y - 5)
+        painter.drawLine(center_x, center_y + 5, center_x, center_y + 8)
+        painter.restore()
+
+    def _draw_handle(self, painter: QPainter, center_x: int, center_y: int, radius: int):
+        painter.save()
+
+        x, y = self._position
+        handle_x = center_x + int(x * (radius - self._handle_radius))
+        handle_y = center_y - int(y * (radius - self._handle_radius))
+
+        connection_pen = QPen(QColor(120, 120, 120, 150), 2, Qt.DashLine)
+        painter.setPen(connection_pen)
+        painter.drawLine(center_x, center_y, handle_x, handle_y)
+
+        shadow_offset = 2
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 60)))
+        painter.drawEllipse(
+            QPoint(handle_x + shadow_offset, handle_y + shadow_offset),
+            self._handle_radius + 1,
+            self._handle_radius + 1,
+        )
+
+        base_color = QColor(80, 160, 255)
+        glow_color = QColor(120, 180, 255, 100)
+        glow_radius = self._handle_radius + 4
+        glow_gradient = QRadialGradient(handle_x, handle_y, glow_radius)
+        glow_gradient.setColorAt(0.0, glow_color)
+        glow_gradient.setColorAt(1.0, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), 0))
+        painter.setBrush(QBrush(glow_gradient))
+        painter.drawEllipse(QPoint(handle_x, handle_y), glow_radius, glow_radius)
+
+        handle_gradient = QRadialGradient(handle_x - 3, handle_y - 3, self._handle_radius)
+        light_color = base_color.lighter(150)
+        handle_gradient.setColorAt(0.0, light_color)
+        handle_gradient.setColorAt(0.5, base_color)
+        handle_gradient.setColorAt(1.0, base_color.darker(120))
+        painter.setBrush(QBrush(handle_gradient))
+        painter.setPen(QPen(base_color.darker(150), 1))
+        painter.drawEllipse(QPoint(handle_x, handle_y), self._handle_radius, self._handle_radius)
+
+        highlight_radius = self._handle_radius - 3
+        if highlight_radius > 0:
+            painter.setBrush(QBrush(QColor(255, 255, 255, 80)))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QPoint(handle_x - 2, handle_y - 2), highlight_radius, highlight_radius)
+
+        painter.restore()
+
+    def _draw_handle_info(self, painter: QPainter) -> None:
+        painter.save()
+
+        x, y = self._position
+        width = self.width()
+        height = self.height()
+        size = min(width, height)
+        center_x = width // 2
+        center_y = height // 2
+        radius = size // 2 - 5
+
+        handle_x = center_x + int(x * (radius - self._handle_radius))
+        handle_y = center_y - int(y * (radius - self._handle_radius))
+
+        font = painter.font()
+        font.setPointSize(max(font.pointSize() - 2, 9))
+        painter.setFont(font)
+
+        coords_text = f"({x:+.2f}, {y:+.2f})"
+        font_metrics = painter.fontMetrics()
+        padding = 6
+        text_width = font_metrics.horizontalAdvance(coords_text) + padding * 2
+        text_height = font_metrics.height() + padding * 2
+        offset = self._handle_radius + 8
+
+        if x <= 0.0:
+            rect_left = handle_x + offset
+            alignment = Qt.AlignLeft | Qt.AlignVCenter
+        else:
+            rect_left = handle_x - offset - text_width
+            alignment = Qt.AlignRight | Qt.AlignVCenter
+
+        rect_top = handle_y - (text_height // 2)
+        text_rect = QRect(rect_left, rect_top, text_width, text_height)
+
+        min_margin = 5
+        if text_rect.left() < min_margin:
+            text_rect.moveLeft(min_margin)
+        if text_rect.right() > width - min_margin:
+            text_rect.moveRight(width - min_margin)
+        if text_rect.top() < min_margin:
+            text_rect.moveTop(min_margin)
+        if text_rect.bottom() > height - min_margin:
+            text_rect.moveBottom(height - min_margin)
+
+        painter.setPen(QPen(QColor(255, 255, 255)))
+        painter.drawText(text_rect, alignment, coords_text)
+        painter.restore()
+
+    def mousePressEvent(self, event):  # noqa: D401 - Qt override
+        if event.button() == Qt.LeftButton:
+            self._pressed = True
+            self._update_position_from_mouse(event.x(), event.y())
+            self.setFocus()
+            self._start_update_timer()
+
+    def mouseMoveEvent(self, event):  # noqa: D401 - Qt override
+        if self._pressed:
+            self._update_position_from_mouse(event.x(), event.y())
+
+    def mouseReleaseEvent(self, event):  # noqa: D401 - Qt override
+        if event.button() == Qt.LeftButton:
+            self._pressed = False
+            self._stop_update_timer()
+            self._set_position(0.0, 0.0, emit_signal=True)
+
+    def keyPressEvent(self, event):  # noqa: D401 - Qt override
+        x, y = self._position
+        step = 0.1
+        changed = False
+
+        if event.key() == Qt.Key_Left:
+            x = max(-1.0, x - step)
+            changed = True
+        elif event.key() == Qt.Key_Right:
+            x = min(1.0, x + step)
+            changed = True
+        elif event.key() == Qt.Key_Up:
+            y = min(1.0, y + step)
+            changed = True
+        elif event.key() == Qt.Key_Down:
+            y = max(-1.0, y - step)
+            changed = True
+        elif event.key() == Qt.Key_Space:
+            x, y = 0.0, 0.0
+            changed = True
+        else:
+            super().keyPressEvent(event)
+            return
+
+        if changed:
+            self._set_position(x, y, emit_signal=True)
+
+    def _update_position_from_mouse(self, mouse_x: int, mouse_y: int):
+        center_x = self.width() // 2
+        center_y = self.height() // 2
+        radius = min(self.width(), self.height()) // 2 - 5
+        max_distance = max(1, radius - self._handle_radius)
+
+        dx = mouse_x - center_x
+        dy = center_y - mouse_y
+        distance = math.sqrt(dx * dx + dy * dy)
+
+        if distance > max_distance:
+            dx = dx * max_distance / distance
+            dy = dy * max_distance / distance
+
+        raw_x = dx / max_distance
+        raw_y = dy / max_distance
+
+        self._set_position(raw_x, raw_y, emit_signal=True)
+
+    def _set_position(self, x: float, y: float, emit_signal: bool = False):
+        x = max(-1.0, min(1.0, x))
+        y = max(-1.0, min(1.0, y))
+
+        if (x, y) != self._position:
+            self._position = (x, y)
+            self.update()
+            if emit_signal:
+                self.position_changed.emit(x, y)
+
+    def _start_update_timer(self):
+        if not self._update_timer.isActive():
+            self._update_timer.start()
+
+    def _stop_update_timer(self):
+        if self._update_timer.isActive():
+            self._update_timer.stop()
+
+    def _emit_position_if_needed(self):
+        if self._pressed:
+            self.position_changed.emit(*self._position)
+
+    def get_position(self) -> Tuple[float, float]:
+        return self._position
+
+    def set_position(self, x: float, y: float):
+        self._set_position(x, y, emit_signal=True)
+
+    def reset_position(self):
+        self._set_position(0.0, 0.0, emit_signal=True)
