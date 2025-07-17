@@ -72,6 +72,18 @@ class JoystickMainWidget(QWidget):
         self._rate_label = QLabel(f"{int(self._config_manager.get_publish_rate())} Hz")
         self._rate_label.setMinimumWidth(30)
         layout.addWidget(self._rate_label, row, 4)
+        
+        # Add dead zone control
+        row += 1
+        layout.addWidget(QLabel("Dead Zone:"), row, 0)
+        self._dead_zone_slider = QSlider(Qt.Horizontal)
+        self._dead_zone_slider.setRange(0, 90)  # 0-90% of full range
+        self._dead_zone_slider.setValue(int(self._config_manager.get_dead_zone() * 100))
+        layout.addWidget(self._dead_zone_slider, row, 1, 1, 3)
+
+        self._dead_zone_label = QLabel(f"{int(self._config_manager.get_dead_zone() * 100)}%")
+        self._dead_zone_label.setMinimumWidth(30)
+        layout.addWidget(self._dead_zone_label, row, 4)
 
         group.setLayout(layout)
         return group
@@ -84,6 +96,7 @@ class JoystickMainWidget(QWidget):
             topic_line_edit.returnPressed.connect(self._on_topic_return_pressed)
 
         self._rate_slider.valueChanged.connect(self._on_rate_changed)
+        self._dead_zone_slider.valueChanged.connect(self._on_dead_zone_changed)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
         self._publisher_service.publisher_error.connect(self._on_publisher_error)
@@ -113,6 +126,15 @@ class JoystickMainWidget(QWidget):
             self._rate_label.setText(f"{value} Hz")
         except ValueError:
             pass
+            
+    @pyqtSlot(int)
+    def _on_dead_zone_changed(self, value: int):
+        try:
+            dead_zone_value = value / 100.0  # Convert percentage to 0.0-0.9 range
+            self._config_manager.set_dead_zone(dead_zone_value)
+            self._dead_zone_label.setText(f"{value}%")
+        except ValueError:
+            pass
 
     @pyqtSlot(float, float)
     def _on_joystick_moved(self, x: float, y: float):
@@ -133,9 +155,14 @@ class JoystickMainWidget(QWidget):
         committed_topic = self._config_manager.get_topic_name()
         self._committed_topic_name = committed_topic
         self._topic_combo.setCurrentText(committed_topic)
+        
         publish_rate = int(self._config_manager.get_publish_rate())
         self._rate_slider.setValue(publish_rate)
         self._rate_label.setText(f"{publish_rate} Hz")
+        
+        dead_zone_value = int(self._config_manager.get_dead_zone() * 100)
+        self._dead_zone_slider.setValue(dead_zone_value)
+        self._dead_zone_label.setText(f"{dead_zone_value}%")
 
     def shutdown(self):
         self._publisher_service.shutdown()

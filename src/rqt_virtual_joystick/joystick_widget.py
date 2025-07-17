@@ -25,6 +25,8 @@ class JoystickWidget(QWidget):
 
         self._config_manager = config_manager
         self._position = (0.0, 0.0)
+        self._raw_position = (0.0, 0.0)
+        self._is_in_dead_zone = False
         self._handle_radius = 12
         self._pressed = False
 
@@ -35,6 +37,7 @@ class JoystickWidget(QWidget):
         self._update_timer.timeout.connect(self._emit_position_if_needed)
 
         self._config_manager.rate_changed.connect(self._on_rate_changed)
+        self._config_manager.dead_zone_changed.connect(self._on_dead_zone_changed)
         self._on_rate_changed(self._config_manager.get_publish_rate())
 
     def _on_rate_changed(self, rate_hz: float):
@@ -45,6 +48,11 @@ class JoystickWidget(QWidget):
         if self._update_timer.isActive():
             self._update_timer.stop()
         self._update_timer.setInterval(interval_ms)
+        
+    def _on_dead_zone_changed(self) -> None:
+        # Re-apply dead zone logic to the last raw position
+        self._set_position(*self._raw_position, emit_signal=True)
+        self.update()
 
     def sizeHint(self) -> QSize:
         return QSize(250, 250)
@@ -146,7 +154,7 @@ class JoystickWidget(QWidget):
                 circle_radius * 2,
             )
             painter.drawEllipse(circle_rect)
-
+            
         main_axis_pen = QPen(QColor(140, 140, 140, 180), 1, Qt.DotLine)
         painter.setPen(main_axis_pen)
         for angle in [0, 90, 180, 270]:
@@ -355,18 +363,36 @@ class JoystickWidget(QWidget):
 
         raw_x = dx / max_distance
         raw_y = dy / max_distance
-
+        
         self._set_position(raw_x, raw_y, emit_signal=True)
 
     def _set_position(self, x: float, y: float, emit_signal: bool = False):
         x = max(-1.0, min(1.0, x))
         y = max(-1.0, min(1.0, y))
 
-        if (x, y) != self._position:
-            self._position = (x, y)
+        self._raw_position = (x, y)
+        processed_x, processed_y = self._apply_dead_zones(x, y)
+
+        should_emit = emit_signal and (not self._is_in_dead_zone or (processed_x, processed_y) == (0.0, 0.0))
+
+        if (processed_x, processed_y) != self._position:
+            self._position = (processed_x, processed_y)
             self.update()
-            if emit_signal:
-                self.position_changed.emit(x, y)
+            if should_emit:
+                self.position_changed.emit(processed_x, processed_y)
+        elif should_emit:
+            self.position_changed.emit(processed_x, processed_y)
+
+    def _apply_dead_zones(self, x: float, y: float) -> Tuple[float, float]:
+        dead_zone = self._config_manager.get_dead_zone()
+
+        distance = math.sqrt(x * x + y * y)
+        self._is_in_dead_zone = distance < dead_zone
+
+        if self._is_in_dead_zone:
+            return (0.0, 0.0)
+
+        return (x, y)
 
     def _start_update_timer(self):
         if not self._update_timer.isActive():
@@ -377,7 +403,7 @@ class JoystickWidget(QWidget):
             self._update_timer.stop()
 
     def _emit_position_if_needed(self):
-        if self._pressed:
+        if self._pressed and not self._is_in_dead_zone:
             self.position_changed.emit(*self._position)
 
     def get_position(self) -> Tuple[float, float]:
