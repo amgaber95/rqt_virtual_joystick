@@ -69,6 +69,7 @@ class JoystickWidget(QWidget):
         radius = size // 2 - 5
 
         self._draw_outer_circle(painter, center_x, center_y, radius)
+        self._draw_dead_zone(painter, center_x, center_y, radius)
         self._draw_axes(painter, center_x, center_y, radius)
         self._draw_polar_grid(painter, center_x, center_y, radius)
         self._draw_center_marker(painter, center_x, center_y)
@@ -110,6 +111,31 @@ class JoystickWidget(QWidget):
             highlight_radius * 2,
         )
         painter.drawEllipse(highlight_rect)
+
+        painter.restore()
+
+    def _draw_dead_zone(self, painter: QPainter, center_x: int, center_y: int, radius: int):
+        painter.save()
+
+        dead_zone = self._config_manager.get_dead_zone()
+        if dead_zone > 0.0:
+            base_color = QColor(255, 100, 100)
+            dead_zone_radius = int(radius * dead_zone)
+
+            gradient = QRadialGradient(center_x, center_y, max(1, dead_zone_radius))
+            gradient.setColorAt(0.0, QColor(base_color.red(), base_color.green(), base_color.blue(), 60))
+            gradient.setColorAt(1.0, QColor(base_color.red(), base_color.green(), base_color.blue(), 20))
+
+            painter.setPen(QPen(QColor(base_color.red(), base_color.green(), base_color.blue(), 120), 2))
+            painter.setBrush(QBrush(gradient))
+
+            dead_zone_rect = QRect(
+                center_x - dead_zone_radius,
+                center_y - dead_zone_radius,
+                dead_zone_radius * 2,
+                dead_zone_radius * 2,
+            )
+            painter.drawEllipse(dead_zone_rect)
 
         painter.restore()
 
@@ -228,8 +254,12 @@ class JoystickWidget(QWidget):
             self._handle_radius + 1,
         )
 
-        base_color = QColor(80, 160, 255)
-        glow_color = QColor(120, 180, 255, 100)
+        if self._is_in_dead_zone:
+            base_color = QColor(255, 80, 80)
+            glow_color = QColor(255, 120, 120, 100)
+        else:
+            base_color = QColor(80, 160, 255)
+            glow_color = QColor(120, 180, 255, 100)
         glow_radius = self._handle_radius + 4
         glow_gradient = QRadialGradient(handle_x, handle_y, glow_radius)
         glow_gradient.setColorAt(0.0, glow_color)
@@ -365,7 +395,7 @@ class JoystickWidget(QWidget):
         raw_y = dy / max_distance
         
         self._set_position(raw_x, raw_y, emit_signal=True)
-
+        
     def _set_position(self, x: float, y: float, emit_signal: bool = False):
         x = max(-1.0, min(1.0, x))
         y = max(-1.0, min(1.0, y))
