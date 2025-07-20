@@ -119,9 +119,10 @@ class JoystickWidget(QWidget):
     def _draw_dead_zone(self, painter: QPainter, center_x: int, center_y: int, radius: int):
         painter.save()
 
+        base_color = QColor(255, 100, 100)
+
         dead_zone = self._config_manager.get_dead_zone()
         if dead_zone > 0.0:
-            base_color = QColor(255, 100, 100)
             dead_zone_radius = int(radius * dead_zone)
 
             gradient = QRadialGradient(center_x, center_y, max(1, dead_zone_radius))
@@ -139,7 +140,43 @@ class JoystickWidget(QWidget):
             )
             painter.drawEllipse(dead_zone_rect)
 
+        self._draw_dead_zone_x(painter, center_x, center_y, radius, base_color)
+
         painter.restore()
+
+    def _draw_dead_zone_x(
+        self,
+        painter: QPainter,
+        center_x: int,
+        center_y: int,
+        radius: int,
+        base_color: QColor,
+    ) -> None:
+        dead_zone_x = self._config_manager.get_dead_zone_x()
+        if dead_zone_x <= 0.0:
+            return
+
+        x_dead_width = int(radius * dead_zone_x)
+        x_gradient = QLinearGradient(
+            center_x - x_dead_width,
+            center_y,
+            center_x + x_dead_width,
+            center_y,
+        )
+        x_gradient.setColorAt(0.0, QColor(base_color.red(), base_color.green(), base_color.blue(), 20))
+        x_gradient.setColorAt(0.5, QColor(base_color.red(), base_color.green(), base_color.blue(), 50))
+        x_gradient.setColorAt(1.0, QColor(base_color.red(), base_color.green(), base_color.blue(), 20))
+
+        painter.setPen(QPen(QColor(base_color.red(), base_color.green(), base_color.blue(), 100), 1))
+        painter.setBrush(QBrush(x_gradient))
+
+        x_dead_rect = QRect(
+            center_x - x_dead_width,
+            center_y - radius + 5,
+            x_dead_width * 2,
+            2 * radius - 10,
+        )
+        painter.drawRect(x_dead_rect)
 
     def _draw_axes(self, painter: QPainter, center_x: int, center_y: int, radius: int):
         painter.save()
@@ -259,6 +296,9 @@ class JoystickWidget(QWidget):
         if self._is_in_dead_zone:
             base_color = QColor(255, 80, 80)
             glow_color = QColor(255, 120, 120, 100)
+        elif self._is_in_x_dead_zone:
+            base_color = QColor(255, 140, 60)
+            glow_color = QColor(255, 180, 100, 100)
         else:
             base_color = QColor(80, 160, 255)
             glow_color = QColor(120, 180, 255, 100)
@@ -424,7 +464,6 @@ class JoystickWidget(QWidget):
 
         if self._is_in_dead_zone:
             return (0.0, 0.0)
-
 
         result_x = 0.0 if self._is_in_x_dead_zone else x
         return (result_x, y)
