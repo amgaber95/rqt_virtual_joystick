@@ -85,6 +85,18 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_label.setMinimumWidth(30)
         layout.addWidget(self._dead_zone_label, row, 4)
 
+        # Add X dead zone control
+        row += 1
+        layout.addWidget(QLabel("Dead Zone X:"), row, 0)
+        self._dead_zone_x_slider = QSlider(Qt.Horizontal)
+        self._dead_zone_x_slider.setRange(0, 90)
+        self._dead_zone_x_slider.setValue(int(self._config_manager.get_dead_zone_x() * 100))
+        layout.addWidget(self._dead_zone_x_slider, row, 1, 1, 3)
+
+        self._dead_zone_x_label = QLabel(f"{int(self._config_manager.get_dead_zone_x() * 100)}%")
+        self._dead_zone_x_label.setMinimumWidth(30)
+        layout.addWidget(self._dead_zone_x_label, row, 4)
+
         group.setLayout(layout)
         return group
 
@@ -97,6 +109,9 @@ class JoystickMainWidget(QWidget):
 
         self._rate_slider.valueChanged.connect(self._on_rate_changed)
         self._dead_zone_slider.valueChanged.connect(self._on_dead_zone_changed)
+        self._dead_zone_x_slider.valueChanged.connect(self._on_dead_zone_x_changed)
+
+        self._config_manager.dead_zone_changed.connect(self._update_dead_zone_controls)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
         self._publisher_service.publisher_error.connect(self._on_publisher_error)
@@ -136,6 +151,15 @@ class JoystickMainWidget(QWidget):
         except ValueError:
             pass
 
+    @pyqtSlot(int)
+    def _on_dead_zone_x_changed(self, value: int):
+        try:
+            dead_zone_value = value / 100.0
+            self._config_manager.set_dead_zone_x(dead_zone_value)
+            self._dead_zone_x_label.setText(f"{value}%")
+        except ValueError:
+            pass
+
     @pyqtSlot(float, float)
     def _on_joystick_moved(self, x: float, y: float):
         self._publisher_service.update_axes(x, y)
@@ -160,10 +184,23 @@ class JoystickMainWidget(QWidget):
         self._rate_slider.setValue(publish_rate)
         self._rate_label.setText(f"{publish_rate} Hz")
         
-        dead_zone_value = int(self._config_manager.get_dead_zone() * 100)
-        self._dead_zone_slider.setValue(dead_zone_value)
-        self._dead_zone_label.setText(f"{dead_zone_value}%")
+        self._update_dead_zone_controls()
 
     def shutdown(self):
         self._publisher_service.shutdown()
         self._joystick_widget.reset_position()
+
+    @pyqtSlot()
+    def _update_dead_zone_controls(self):
+        dead_zone_value = int(self._config_manager.get_dead_zone() * 100)
+        dead_zone_x_value = int(self._config_manager.get_dead_zone_x() * 100)
+
+        self._dead_zone_slider.blockSignals(True)
+        self._dead_zone_slider.setValue(dead_zone_value)
+        self._dead_zone_slider.blockSignals(False)
+        self._dead_zone_label.setText(f"{dead_zone_value}%")
+
+        self._dead_zone_x_slider.blockSignals(True)
+        self._dead_zone_x_slider.setValue(dead_zone_x_value)
+        self._dead_zone_x_slider.blockSignals(False)
+        self._dead_zone_x_label.setText(f"{dead_zone_x_value}%")

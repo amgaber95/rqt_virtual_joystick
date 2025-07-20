@@ -12,6 +12,7 @@ class JoystickConfig:
     topic_name: str = "joy"
     publish_rate: float = 20.0  # Hz
     dead_zone: float = 0.05  # Circular dead zone (0.0-0.9)
+    dead_zone_x: float = 0.0  # X-axis dead zone (0.0-0.9)
 
     def __post_init__(self):
         self.validate()
@@ -25,6 +26,9 @@ class JoystickConfig:
             
         if not 0.0 <= self.dead_zone <= 0.9:
             raise ValueError("Dead zone must be between 0.0 and 0.9")
+
+        if not 0.0 <= self.dead_zone_x <= 0.9:
+            raise ValueError("X dead zone must be between 0.0 and 0.9")
 
 
 class ConfigurationManager(QObject):
@@ -76,10 +80,26 @@ class ConfigurationManager(QObject):
             self.dead_zone_changed.emit()
             self.config_changed.emit()
 
+    def get_dead_zone_x(self) -> float:
+        return self._config.dead_zone_x
+
+    def set_dead_zone_x(self, dead_zone_x: float):
+        if not 0.0 <= dead_zone_x <= 0.9:
+            raise ValueError("X dead zone must be between 0.0 and 0.9")
+
+        if dead_zone_x != self._config.dead_zone_x:
+            self._config.dead_zone_x = dead_zone_x
+            self.dead_zone_changed.emit()
+            self.config_changed.emit()
+
+    def get_dead_zones(self) -> tuple[float, float]:
+        return (self._config.dead_zone, self._config.dead_zone_x)
+
     def save_settings(self, settings) -> None:
         settings.set_value('topic_name', self._config.topic_name)
         settings.set_value('publish_rate', self._config.publish_rate)
         settings.set_value('dead_zone', self._config.dead_zone)
+        settings.set_value('dead_zone_x', self._config.dead_zone_x)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -100,10 +120,15 @@ class ConfigurationManager(QObject):
             self.set_publish_rate(20.0)
             
         dead_zone_value = settings.value('dead_zone')
-        if dead_zone_value is None:
-            dead_zone_value = settings.value('radial_dead_zone')  # backward compatibility
         dead_zone = safe_convert(dead_zone_value, float, 0.05)
         try:
             self.set_dead_zone(dead_zone)
         except ValueError:
             self.set_dead_zone(0.05)
+
+        dead_zone_x_value = settings.value('dead_zone_x')
+        dead_zone_x = safe_convert(dead_zone_x_value, float, 0.0)
+        try:
+            self.set_dead_zone_x(dead_zone_x)
+        except ValueError:
+            self.set_dead_zone_x(0.0)
