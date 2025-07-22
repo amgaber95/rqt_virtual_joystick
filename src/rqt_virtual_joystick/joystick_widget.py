@@ -29,6 +29,7 @@ class JoystickWidget(QWidget):
         self._raw_position = (0.0, 0.0)
         self._is_in_dead_zone = False
         self._is_in_x_dead_zone = False
+        self._is_in_y_dead_zone = False
         self._handle_radius = 12
         self._pressed = False
 
@@ -456,17 +457,28 @@ class JoystickWidget(QWidget):
             self.position_changed.emit(processed_x, processed_y)
 
     def _apply_dead_zones(self, x: float, y: float) -> Tuple[float, float]:
-        dead_zone, dead_zone_x = self._config_manager.get_dead_zones()
-
-        distance = math.sqrt(x * x + y * y)
-        self._is_in_dead_zone = distance < dead_zone
+        """Apply dead zone processing."""
+        dead_zone, dead_zone_x, dead_zone_y = self._config_manager.get_dead_zones()
+        
+        # Check circular dead zone
+        distance = math.sqrt(x*x + y*y)
+        in_circular_dead = distance < dead_zone
+        
+        # Check axis-specific dead zones
         self._is_in_x_dead_zone = abs(x) < dead_zone_x
-
-        if self._is_in_dead_zone:
+        self._is_in_y_dead_zone = abs(y) < dead_zone_y
+        
+        # Overall dead zone status
+        self._is_in_dead_zone = in_circular_dead or (self._is_in_x_dead_zone and self._is_in_y_dead_zone)
+        
+        # Apply dead zones
+        if in_circular_dead:
             return (0.0, 0.0)
-
+            
         result_x = 0.0 if self._is_in_x_dead_zone else x
-        return (result_x, y)
+        result_y = 0.0 if self._is_in_y_dead_zone else y
+        
+        return (result_x, result_y)
 
     def _start_update_timer(self):
         if not self._update_timer.isActive():

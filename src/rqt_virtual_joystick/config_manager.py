@@ -13,6 +13,7 @@ class JoystickConfig:
     publish_rate: float = 20.0  # Hz
     dead_zone: float = 0.05  # Circular dead zone (0.0-0.9)
     dead_zone_x: float = 0.0  # X-axis dead zone (0.0-0.9)
+    dead_zone_y: float = 0.0  # Y-axis dead zone (0.0-0.9)
 
     def __post_init__(self):
         self.validate()
@@ -29,6 +30,9 @@ class JoystickConfig:
 
         if not 0.0 <= self.dead_zone_x <= 0.9:
             raise ValueError("X dead zone must be between 0.0 and 0.9")
+
+        if not 0.0 <= self.dead_zone_y <= 0.9:
+            raise ValueError("Y dead zone must be between 0.0 and 0.9")
 
 
 class ConfigurationManager(QObject):
@@ -92,14 +96,31 @@ class ConfigurationManager(QObject):
             self.dead_zone_changed.emit()
             self.config_changed.emit()
 
-    def get_dead_zones(self) -> tuple[float, float]:
-        return (self._config.dead_zone, self._config.dead_zone_x)
+    def get_dead_zone_y(self) -> float:
+        return self._config.dead_zone_y
+
+    def set_dead_zone_y(self, dead_zone_y: float):
+        if not 0.0 <= dead_zone_y <= 0.9:
+            raise ValueError("Y dead zone must be between 0.0 and 0.9")
+
+        if dead_zone_y != self._config.dead_zone_y:
+            self._config.dead_zone_y = dead_zone_y
+            self.dead_zone_changed.emit()
+            self.config_changed.emit()
+
+    def get_dead_zones(self) -> tuple[float, float, float]:
+        return (
+            self._config.dead_zone,
+            self._config.dead_zone_x,
+            self._config.dead_zone_y,
+        )
 
     def save_settings(self, settings) -> None:
         settings.set_value('topic_name', self._config.topic_name)
         settings.set_value('publish_rate', self._config.publish_rate)
         settings.set_value('dead_zone', self._config.dead_zone)
         settings.set_value('dead_zone_x', self._config.dead_zone_x)
+        settings.set_value('dead_zone_y', self._config.dead_zone_y)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -132,3 +153,10 @@ class ConfigurationManager(QObject):
             self.set_dead_zone_x(dead_zone_x)
         except ValueError:
             self.set_dead_zone_x(0.0)
+
+        dead_zone_y_value = settings.value('dead_zone_y')
+        dead_zone_y = safe_convert(dead_zone_y_value, float, 0.0)
+        try:
+            self.set_dead_zone_y(dead_zone_y)
+        except ValueError:
+            self.set_dead_zone_y(0.0)
