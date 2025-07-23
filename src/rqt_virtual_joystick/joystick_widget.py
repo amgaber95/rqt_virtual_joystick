@@ -142,6 +142,7 @@ class JoystickWidget(QWidget):
             painter.drawEllipse(dead_zone_rect)
 
         self._draw_dead_zone_x(painter, center_x, center_y, radius, base_color)
+        self._draw_dead_zone_y(painter, center_x, center_y, radius, base_color)
 
         painter.restore()
 
@@ -178,6 +179,40 @@ class JoystickWidget(QWidget):
             2 * radius - 10,
         )
         painter.drawRect(x_dead_rect)
+
+    def _draw_dead_zone_y(
+        self,
+        painter: QPainter,
+        center_x: int,
+        center_y: int,
+        radius: int,
+        base_color: QColor,
+    ) -> None:
+        dead_zone_y = self._config_manager.get_dead_zone_y()
+        if dead_zone_y <= 0.0:
+            return
+
+        y_dead_height = int(radius * dead_zone_y)
+        y_gradient = QLinearGradient(
+            center_x,
+            center_y - y_dead_height,
+            center_x,
+            center_y + y_dead_height,
+        )
+        y_gradient.setColorAt(0.0, QColor(base_color.red(), base_color.green(), base_color.blue(), 20))
+        y_gradient.setColorAt(0.5, QColor(base_color.red(), base_color.green(), base_color.blue(), 40))
+        y_gradient.setColorAt(1.0, QColor(base_color.red(), base_color.green(), base_color.blue(), 20))
+
+        painter.setPen(QPen(QColor(base_color.red(), base_color.green(), base_color.blue(), 100), 1))
+        painter.setBrush(QBrush(y_gradient))
+
+        y_dead_rect = QRect(
+            center_x - radius + 5,
+            center_y - y_dead_height,
+            2 * radius - 10,
+            y_dead_height * 2,
+        )
+        painter.drawRect(y_dead_rect)
 
     def _draw_axes(self, painter: QPainter, center_x: int, center_y: int, radius: int):
         painter.save()
@@ -297,7 +332,7 @@ class JoystickWidget(QWidget):
         if self._is_in_dead_zone:
             base_color = QColor(255, 80, 80)
             glow_color = QColor(255, 120, 120, 100)
-        elif self._is_in_x_dead_zone:
+        elif self._is_in_x_dead_zone or self._is_in_y_dead_zone:
             base_color = QColor(255, 140, 60)
             glow_color = QColor(255, 180, 100, 100)
         else:
