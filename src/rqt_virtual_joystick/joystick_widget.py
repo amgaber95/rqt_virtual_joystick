@@ -8,6 +8,7 @@ from python_qt_binding.QtGui import (
     QBrush,
     QColor,
     QLinearGradient,
+    QPainterPath,
     QRadialGradient,
     QFont,
 )
@@ -78,6 +79,7 @@ class JoystickWidget(QWidget):
 
         self._draw_outer_circle(painter, center_x, center_y, radius)
         self._draw_dead_zone(painter, center_x, center_y, radius)
+        self._draw_expo_visual(painter, center_x, center_y, radius)
         self._draw_axes(painter, center_x, center_y, radius)
         self._draw_polar_grid(painter, center_x, center_y, radius)
         self._draw_center_marker(painter, center_x, center_y)
@@ -148,6 +150,45 @@ class JoystickWidget(QWidget):
 
         self._draw_dead_zone_x(painter, center_x, center_y, radius, base_color)
         self._draw_dead_zone_y(painter, center_x, center_y, radius, base_color)
+
+        painter.restore()
+
+    def _draw_expo_visual(self, painter: QPainter, center_x: int, center_y: int, radius: int) -> None:
+        expo_x = self._config_manager.get_expo_x()
+        if expo_x <= 0.0:
+            return
+
+        painter.save()
+
+        clip_path = QPainterPath()
+        clip_path.addEllipse(center_x - radius, center_y - radius, radius * 2, radius * 2)
+        painter.setClipPath(clip_path)
+
+        curve_radius = int(radius * 0.85)
+        expo_factor = expo_x / 100.0
+
+        painter.setPen(QPen(QColor(255, 120, 120, 200), 2))
+        path = QPainterPath()
+
+        for i in range(101):
+            input_val = -1.0 + i * 0.02
+            sign = 1.0 if input_val >= 0.0 else -1.0
+            abs_val = abs(input_val)
+            output_val = sign * (abs_val * (1.0 - expo_factor) + (abs_val ** 3) * expo_factor)
+
+            px = center_x + int(input_val * curve_radius)
+            py = center_y - int(output_val * curve_radius)
+
+            if i == 0:
+                path.moveTo(px, py)
+            else:
+                path.lineTo(px, py)
+
+        painter.drawPath(path)
+
+        painter.setPen(QPen(QColor(150, 150, 150, 100), 1, Qt.DotLine))
+        painter.drawLine(center_x - curve_radius, center_y, center_x + curve_radius, center_y)
+        painter.setClipping(False)
 
         painter.restore()
 
@@ -515,7 +556,6 @@ class JoystickWidget(QWidget):
 
         result_x = 0.0 if self._is_in_x_dead_zone else x
         result_y = 0.0 if self._is_in_y_dead_zone else y
-        
         return (result_x, result_y)
 
     def _apply_exponential_response(self, x: float, y: float) -> Tuple[float, float]:
