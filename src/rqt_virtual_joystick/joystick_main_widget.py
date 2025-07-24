@@ -109,6 +109,18 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_y_label.setMinimumWidth(30)
         layout.addWidget(self._dead_zone_y_label, row, 4)
 
+        # Add Expo X control
+        row += 1
+        layout.addWidget(QLabel("Expo X:"), row, 0)
+        self._expo_x_slider = QSlider(Qt.Horizontal)
+        self._expo_x_slider.setRange(0, 100)
+        self._expo_x_slider.setValue(int(self._config_manager.get_expo_x()))
+        layout.addWidget(self._expo_x_slider, row, 1, 1, 3)
+
+        self._expo_x_label = QLabel(f"{int(self._config_manager.get_expo_x())}%")
+        self._expo_x_label.setMinimumWidth(30)
+        layout.addWidget(self._expo_x_label, row, 4)
+
         group.setLayout(layout)
         return group
 
@@ -123,8 +135,10 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_slider.valueChanged.connect(self._on_dead_zone_changed)
         self._dead_zone_x_slider.valueChanged.connect(self._on_dead_zone_x_changed)
         self._dead_zone_y_slider.valueChanged.connect(self._on_dead_zone_y_changed)
+        self._expo_x_slider.valueChanged.connect(self._on_expo_x_changed)
 
-        self._config_manager.dead_zone_changed.connect(self._update_dead_zone_controls)
+        self._config_manager.dead_zone_changed.connect(self._update_control_values)
+        self._config_manager.expo_changed.connect(self._update_control_values)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
         self._publisher_service.publisher_error.connect(self._on_publisher_error)
@@ -206,17 +220,18 @@ class JoystickMainWidget(QWidget):
         self._rate_slider.setValue(publish_rate)
         self._rate_label.setText(f"{publish_rate} Hz")
         
-        self._update_dead_zone_controls()
+        self._update_control_values()
 
     def shutdown(self):
         self._publisher_service.shutdown()
         self._joystick_widget.reset_position()
 
     @pyqtSlot()
-    def _update_dead_zone_controls(self):
+    def _update_control_values(self):
         dead_zone_value = int(self._config_manager.get_dead_zone() * 100)
         dead_zone_x_value = int(self._config_manager.get_dead_zone_x() * 100)
         dead_zone_y_value = int(self._config_manager.get_dead_zone_y() * 100)
+        expo_x_value = int(self._config_manager.get_expo_x())
 
         self._dead_zone_slider.blockSignals(True)
         self._dead_zone_slider.setValue(dead_zone_value)
@@ -232,3 +247,16 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_y_slider.setValue(dead_zone_y_value)
         self._dead_zone_y_slider.blockSignals(False)
         self._dead_zone_y_label.setText(f"{dead_zone_y_value}%")
+
+        self._expo_x_slider.blockSignals(True)
+        self._expo_x_slider.setValue(expo_x_value)
+        self._expo_x_slider.blockSignals(False)
+        self._expo_x_label.setText(f"{expo_x_value}%")
+
+    @pyqtSlot(int)
+    def _on_expo_x_changed(self, value: int):
+        try:
+            self._config_manager.set_expo_x(float(value))
+            self._expo_x_label.setText(f"{value}%")
+        except ValueError:
+            pass

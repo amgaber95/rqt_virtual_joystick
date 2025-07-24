@@ -14,6 +14,7 @@ class JoystickConfig:
     dead_zone: float = 0.05  # Circular dead zone (0.0-0.9)
     dead_zone_x: float = 0.0  # X-axis dead zone (0.0-0.9)
     dead_zone_y: float = 0.0  # Y-axis dead zone (0.0-0.9)
+    expo_x: float = 0.0  # X-axis exponential response (0-100%)
 
     def __post_init__(self):
         self.validate()
@@ -34,6 +35,9 @@ class JoystickConfig:
         if not 0.0 <= self.dead_zone_y <= 0.9:
             raise ValueError("Y dead zone must be between 0.0 and 0.9")
 
+        if not 0.0 <= self.expo_x <= 100.0:
+            raise ValueError("X expo must be between 0.0 and 100.0%")
+
 
 class ConfigurationManager(QObject):
     """Tracks configuration values and emits change notifications."""
@@ -42,6 +46,7 @@ class ConfigurationManager(QObject):
     topic_changed = pyqtSignal(str)
     rate_changed = pyqtSignal(float)
     dead_zone_changed = pyqtSignal()
+    expo_changed = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -115,12 +120,25 @@ class ConfigurationManager(QObject):
             self._config.dead_zone_y,
         )
 
+    def get_expo_x(self) -> float:
+        return self._config.expo_x
+
+    def set_expo_x(self, expo_x: float):
+        if not 0.0 <= expo_x <= 100.0:
+            raise ValueError("X expo must be between 0.0 and 100.0%")
+
+        if expo_x != self._config.expo_x:
+            self._config.expo_x = expo_x
+            self.expo_changed.emit()
+            self.config_changed.emit()
+
     def save_settings(self, settings) -> None:
         settings.set_value('topic_name', self._config.topic_name)
         settings.set_value('publish_rate', self._config.publish_rate)
         settings.set_value('dead_zone', self._config.dead_zone)
         settings.set_value('dead_zone_x', self._config.dead_zone_x)
         settings.set_value('dead_zone_y', self._config.dead_zone_y)
+        settings.set_value('expo_x', self._config.expo_x)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -141,6 +159,8 @@ class ConfigurationManager(QObject):
             self.set_publish_rate(20.0)
             
         dead_zone_value = settings.value('dead_zone')
+        if dead_zone_value is None:
+            dead_zone_value = settings.value('radial_dead_zone')
         dead_zone = safe_convert(dead_zone_value, float, 0.05)
         try:
             self.set_dead_zone(dead_zone)
@@ -148,6 +168,8 @@ class ConfigurationManager(QObject):
             self.set_dead_zone(0.05)
 
         dead_zone_x_value = settings.value('dead_zone_x')
+        if dead_zone_x_value is None:
+            dead_zone_x_value = settings.value('dead_zone_horizontal')
         dead_zone_x = safe_convert(dead_zone_x_value, float, 0.0)
         try:
             self.set_dead_zone_x(dead_zone_x)
@@ -155,8 +177,17 @@ class ConfigurationManager(QObject):
             self.set_dead_zone_x(0.0)
 
         dead_zone_y_value = settings.value('dead_zone_y')
+        if dead_zone_y_value is None:
+            dead_zone_y_value = settings.value('dead_zone_vertical')
         dead_zone_y = safe_convert(dead_zone_y_value, float, 0.0)
         try:
             self.set_dead_zone_y(dead_zone_y)
         except ValueError:
             self.set_dead_zone_y(0.0)
+
+        expo_x_value = settings.value('expo_x')
+        expo_x = safe_convert(expo_x_value, float, 0.0)
+        try:
+            self.set_expo_x(expo_x)
+        except ValueError:
+            self.set_expo_x(0.0)

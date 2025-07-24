@@ -41,6 +41,7 @@ class JoystickWidget(QWidget):
 
         self._config_manager.rate_changed.connect(self._on_rate_changed)
         self._config_manager.dead_zone_changed.connect(self._on_dead_zone_changed)
+        self._config_manager.expo_changed.connect(self._on_expo_changed)
         self._on_rate_changed(self._config_manager.get_publish_rate())
 
     def _on_rate_changed(self, rate_hz: float):
@@ -54,6 +55,10 @@ class JoystickWidget(QWidget):
         
     def _on_dead_zone_changed(self) -> None:
         # Re-apply dead zone logic to the last raw position
+        self._set_position(*self._raw_position, emit_signal=True)
+        self.update()
+
+    def _on_expo_changed(self) -> None:
         self._set_position(*self._raw_position, emit_signal=True)
         self.update()
 
@@ -480,40 +485,50 @@ class JoystickWidget(QWidget):
 
         self._raw_position = (x, y)
         processed_x, processed_y = self._apply_dead_zones(x, y)
+        final_x, final_y = self._apply_exponential_response(processed_x, processed_y)
 
-        should_emit = emit_signal and (not self._is_in_dead_zone or (processed_x, processed_y) == (0.0, 0.0))
+        should_emit = emit_signal and (not self._is_in_dead_zone or (final_x, final_y) == (0.0, 0.0))
 
-        if (processed_x, processed_y) != self._position:
-            self._position = (processed_x, processed_y)
+        if (final_x, final_y) != self._position:
+            self._position = (final_x, final_y)
             self.update()
             if should_emit:
-                self.position_changed.emit(processed_x, processed_y)
+                self.position_changed.emit(final_x, final_y)
         elif should_emit:
-            self.position_changed.emit(processed_x, processed_y)
+            self.position_changed.emit(final_x, final_y)
 
     def _apply_dead_zones(self, x: float, y: float) -> Tuple[float, float]:
-        """Apply dead zone processing."""
         dead_zone, dead_zone_x, dead_zone_y = self._config_manager.get_dead_zones()
-        
-        # Check circular dead zone
-        distance = math.sqrt(x*x + y*y)
+
+        distance = math.sqrt(x * x + y * y)
         in_circular_dead = distance < dead_zone
-        
-        # Check axis-specific dead zones
+
+        if in_circular_dead:
+            self._is_in_dead_zone = True
+            self._is_in_x_dead_zone = True
+            self._is_in_y_dead_zone = True
+            return (0.0, 0.0)
+
         self._is_in_x_dead_zone = abs(x) < dead_zone_x
         self._is_in_y_dead_zone = abs(y) < dead_zone_y
-        
-        # Overall dead zone status
-        self._is_in_dead_zone = in_circular_dead or (self._is_in_x_dead_zone and self._is_in_y_dead_zone)
-        
-        # Apply dead zones
-        if in_circular_dead:
-            return (0.0, 0.0)
-            
+        self._is_in_dead_zone = self._is_in_x_dead_zone and self._is_in_y_dead_zone
+
         result_x = 0.0 if self._is_in_x_dead_zone else x
         result_y = 0.0 if self._is_in_y_dead_zone else y
         
         return (result_x, result_y)
+
+    def _apply_exponential_response(self, x: float, y: float) -> Tuple[float, float]:
+        expo_x = self._config_manager.get_expo_x()
+
+        if expo_x <= 0.0 or x == 0.0:
+            return (x, y)
+
+        expo_factor = expo_x / 100.0
+        sign_x = 1.0 if x > 0.0 else -1.0
+        abs_x = abs(x)
+        adjusted_x = sign_x * (abs_x * (1.0 - expo_factor) + (abs_x ** 3) * expo_factor)
+        return (adjusted_x, y)
 
     def _start_update_timer(self):
         if not self._update_timer.isActive():
