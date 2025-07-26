@@ -155,7 +155,8 @@ class JoystickWidget(QWidget):
 
     def _draw_expo_visual(self, painter: QPainter, center_x: int, center_y: int, radius: int) -> None:
         expo_x = self._config_manager.get_expo_x()
-        if expo_x <= 0.0:
+        expo_y = self._config_manager.get_expo_y()
+        if expo_x <= 0.0 and expo_y <= 0.0:
             return
 
         painter.save()
@@ -165,29 +166,53 @@ class JoystickWidget(QWidget):
         painter.setClipPath(clip_path)
 
         curve_radius = int(radius * 0.85)
-        expo_factor = expo_x / 100.0
+        samples = 101
 
-        painter.setPen(QPen(QColor(255, 120, 120, 200), 2))
-        path = QPainterPath()
+        if expo_x > 0.0:
+            expo_factor_x = expo_x / 100.0
+            painter.setPen(QPen(QColor(255, 120, 120, 200), 2))
+            x_path = QPainterPath()
 
-        for i in range(101):
-            input_val = -1.0 + i * 0.02
-            sign = 1.0 if input_val >= 0.0 else -1.0
-            abs_val = abs(input_val)
-            output_val = sign * (abs_val * (1.0 - expo_factor) + (abs_val ** 3) * expo_factor)
+            for i in range(samples):
+                input_val = -1.0 + i * 0.02
+                sign = 1.0 if input_val >= 0.0 else -1.0
+                abs_val = abs(input_val)
+                output_val = sign * (abs_val * (1.0 - expo_factor_x) + (abs_val ** 3) * expo_factor_x)
 
-            px = center_x + int(input_val * curve_radius)
-            py = center_y - int(output_val * curve_radius)
+                px = center_x + int(input_val * curve_radius)
+                py = center_y - int(output_val * curve_radius)
 
-            if i == 0:
-                path.moveTo(px, py)
-            else:
-                path.lineTo(px, py)
+                if i == 0:
+                    x_path.moveTo(px, py)
+                else:
+                    x_path.lineTo(px, py)
 
-        painter.drawPath(path)
+            painter.drawPath(x_path)
+
+        if expo_y > 0.0:
+            expo_factor_y = expo_y / 100.0
+            painter.setPen(QPen(QColor(120, 120, 255, 200), 2))
+            y_path = QPainterPath()
+
+            for i in range(samples):
+                input_val = -1.0 + i * 0.02
+                sign = 1.0 if input_val >= 0.0 else -1.0
+                abs_val = abs(input_val)
+                output_val = sign * (abs_val * (1.0 - expo_factor_y) + (abs_val ** 3) * expo_factor_y)
+
+                px = center_x + int(output_val * curve_radius)
+                py = center_y - int(input_val * curve_radius)
+
+                if i == 0:
+                    y_path.moveTo(px, py)
+                else:
+                    y_path.lineTo(px, py)
+
+            painter.drawPath(y_path)
 
         painter.setPen(QPen(QColor(150, 150, 150, 100), 1, Qt.DotLine))
         painter.drawLine(center_x - curve_radius, center_y, center_x + curve_radius, center_y)
+        painter.drawLine(center_x, center_y - curve_radius, center_x, center_y + curve_radius)
         painter.setClipping(False)
 
         painter.restore()
@@ -560,15 +585,24 @@ class JoystickWidget(QWidget):
 
     def _apply_exponential_response(self, x: float, y: float) -> Tuple[float, float]:
         expo_x = self._config_manager.get_expo_x()
+        expo_y = self._config_manager.get_expo_y()
 
-        if expo_x <= 0.0 or x == 0.0:
-            return (x, y)
+        adjusted_x = x
+        adjusted_y = y
 
-        expo_factor = expo_x / 100.0
-        sign_x = 1.0 if x > 0.0 else -1.0
-        abs_x = abs(x)
-        adjusted_x = sign_x * (abs_x * (1.0 - expo_factor) + (abs_x ** 3) * expo_factor)
-        return (adjusted_x, y)
+        if expo_x > 0.0 and x != 0.0:
+            expo_factor_x = expo_x / 100.0
+            sign_x = 1.0 if x > 0.0 else -1.0
+            abs_x = abs(x)
+            adjusted_x = sign_x * (abs_x * (1.0 - expo_factor_x) + (abs_x ** 3) * expo_factor_x)
+
+        if expo_y > 0.0 and y != 0.0:
+            expo_factor_y = expo_y / 100.0
+            sign_y = 1.0 if y > 0.0 else -1.0
+            abs_y = abs(y)
+            adjusted_y = sign_y * (abs_y * (1.0 - expo_factor_y) + (abs_y ** 3) * expo_factor_y)
+
+        return (adjusted_x, adjusted_y)
 
     def _start_update_timer(self):
         if not self._update_timer.isActive():
