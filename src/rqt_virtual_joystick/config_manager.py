@@ -15,6 +15,7 @@ class JoystickConfig:
     dead_zone_x: float = 0.0  # X-axis dead zone (0.0-0.9)
     dead_zone_y: float = 0.0  # Y-axis dead zone (0.0-0.9)
     expo_x: float = 0.0  # X-axis exponential response (0-100%)
+    expo_y: float = 0.0  # Y-axis exponential response (0-100%)
 
     def __post_init__(self):
         self.validate()
@@ -37,6 +38,9 @@ class JoystickConfig:
 
         if not 0.0 <= self.expo_x <= 100.0:
             raise ValueError("X expo must be between 0.0 and 100.0%")
+
+        if not 0.0 <= self.expo_y <= 100.0:
+            raise ValueError("Y expo must be between 0.0 and 100.0%")
 
 
 class ConfigurationManager(QObject):
@@ -132,6 +136,18 @@ class ConfigurationManager(QObject):
             self.expo_changed.emit()
             self.config_changed.emit()
 
+    def get_expo_y(self) -> float:
+        return self._config.expo_y
+
+    def set_expo_y(self, expo_y: float):
+        if not 0.0 <= expo_y <= 100.0:
+            raise ValueError("Y expo must be between 0.0 and 100.0%")
+
+        if expo_y != self._config.expo_y:
+            self._config.expo_y = expo_y
+            self.expo_changed.emit()
+            self.config_changed.emit()
+
     def save_settings(self, settings) -> None:
         settings.set_value('topic_name', self._config.topic_name)
         settings.set_value('publish_rate', self._config.publish_rate)
@@ -139,6 +155,7 @@ class ConfigurationManager(QObject):
         settings.set_value('dead_zone_x', self._config.dead_zone_x)
         settings.set_value('dead_zone_y', self._config.dead_zone_y)
         settings.set_value('expo_x', self._config.expo_x)
+        settings.set_value('expo_y', self._config.expo_y)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -191,3 +208,10 @@ class ConfigurationManager(QObject):
             self.set_expo_x(expo_x)
         except ValueError:
             self.set_expo_x(0.0)
+
+        expo_y_value = settings.value('expo_y')
+        expo_y = safe_convert(expo_y_value, float, 0.0)
+        try:
+            self.set_expo_y(expo_y)
+        except ValueError:
+            self.set_expo_y(0.0)

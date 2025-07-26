@@ -121,6 +121,18 @@ class JoystickMainWidget(QWidget):
         self._expo_x_label.setMinimumWidth(30)
         layout.addWidget(self._expo_x_label, row, 4)
 
+        # Add Expo Y control
+        row += 1
+        layout.addWidget(QLabel("Expo Y:"), row, 0)
+        self._expo_y_slider = QSlider(Qt.Horizontal)
+        self._expo_y_slider.setRange(0, 100)
+        self._expo_y_slider.setValue(int(self._config_manager.get_expo_y()))
+        layout.addWidget(self._expo_y_slider, row, 1, 1, 3)
+
+        self._expo_y_label = QLabel(f"{int(self._config_manager.get_expo_y())}%")
+        self._expo_y_label.setMinimumWidth(30)
+        layout.addWidget(self._expo_y_label, row, 4)
+
         group.setLayout(layout)
         return group
 
@@ -136,6 +148,7 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_x_slider.valueChanged.connect(self._on_dead_zone_x_changed)
         self._dead_zone_y_slider.valueChanged.connect(self._on_dead_zone_y_changed)
         self._expo_x_slider.valueChanged.connect(self._on_expo_x_changed)
+        self._expo_y_slider.valueChanged.connect(self._on_expo_y_changed)
 
         self._config_manager.dead_zone_changed.connect(self._update_control_values)
         self._config_manager.expo_changed.connect(self._update_control_values)
@@ -232,6 +245,7 @@ class JoystickMainWidget(QWidget):
         dead_zone_x_value = int(self._config_manager.get_dead_zone_x() * 100)
         dead_zone_y_value = int(self._config_manager.get_dead_zone_y() * 100)
         expo_x_value = int(self._config_manager.get_expo_x())
+        expo_y_value = int(self._config_manager.get_expo_y())
 
         self._dead_zone_slider.blockSignals(True)
         self._dead_zone_slider.setValue(dead_zone_value)
@@ -253,10 +267,23 @@ class JoystickMainWidget(QWidget):
         self._expo_x_slider.blockSignals(False)
         self._expo_x_label.setText(f"{expo_x_value}%")
 
+        self._expo_y_slider.blockSignals(True)
+        self._expo_y_slider.setValue(expo_y_value)
+        self._expo_y_slider.blockSignals(False)
+        self._expo_y_label.setText(f"{expo_y_value}%")
+
     @pyqtSlot(int)
     def _on_expo_x_changed(self, value: int):
         try:
             self._config_manager.set_expo_x(float(value))
             self._expo_x_label.setText(f"{value}%")
+        except ValueError:
+            pass
+
+    @pyqtSlot(int)
+    def _on_expo_y_changed(self, value: int):
+        try:
+            self._config_manager.set_expo_y(float(value))
+            self._expo_y_label.setText(f"{value}%")
         except ValueError:
             pass
