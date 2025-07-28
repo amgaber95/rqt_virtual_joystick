@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from python_qt_binding.QtCore import QObject, pyqtSignal
 
 
+RETURN_MODE_BOTH = "both"
+RETURN_MODE_HORIZONTAL = "horizontal"
+RETURN_MODE_VERTICAL = "vertical"
+RETURN_MODE_NONE = "none"
+
+
 @dataclass
 class JoystickConfig:
     """Container for the user editable joystick configuration."""
@@ -16,6 +22,7 @@ class JoystickConfig:
     dead_zone_y: float = 0.0  # Y-axis dead zone (0.0-0.9)
     expo_x: float = 0.0  # X-axis exponential response (0-100%)
     expo_y: float = 0.0  # Y-axis exponential response (0-100%)
+    return_mode: str = RETURN_MODE_BOTH
 
     def __post_init__(self):
         self.validate()
@@ -42,6 +49,14 @@ class JoystickConfig:
         if not 0.0 <= self.expo_y <= 100.0:
             raise ValueError("Y expo must be between 0.0 and 100.0%")
 
+        valid_modes = [
+            RETURN_MODE_BOTH,
+            RETURN_MODE_HORIZONTAL,
+            RETURN_MODE_VERTICAL,
+            RETURN_MODE_NONE,
+        ]
+        if self.return_mode not in valid_modes:
+            raise ValueError(f"Return mode must be one of {valid_modes}")
 
 class ConfigurationManager(QObject):
     """Tracks configuration values and emits change notifications."""
@@ -51,6 +66,7 @@ class ConfigurationManager(QObject):
     rate_changed = pyqtSignal(float)
     dead_zone_changed = pyqtSignal()
     expo_changed = pyqtSignal()
+    return_mode_changed = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -148,6 +164,24 @@ class ConfigurationManager(QObject):
             self.expo_changed.emit()
             self.config_changed.emit()
 
+    def get_return_mode(self) -> str:
+        return self._config.return_mode
+
+    def set_return_mode(self, return_mode: str):
+        valid_modes = [
+            RETURN_MODE_BOTH,
+            RETURN_MODE_HORIZONTAL,
+            RETURN_MODE_VERTICAL,
+            RETURN_MODE_NONE,
+        ]
+        if return_mode not in valid_modes:
+            raise ValueError("Invalid return mode")
+
+        if return_mode != self._config.return_mode:
+            self._config.return_mode = return_mode
+            self.return_mode_changed.emit(return_mode)
+            self.config_changed.emit()
+
     def save_settings(self, settings) -> None:
         settings.set_value('topic_name', self._config.topic_name)
         settings.set_value('publish_rate', self._config.publish_rate)
@@ -156,6 +190,7 @@ class ConfigurationManager(QObject):
         settings.set_value('dead_zone_y', self._config.dead_zone_y)
         settings.set_value('expo_x', self._config.expo_x)
         settings.set_value('expo_y', self._config.expo_y)
+        settings.set_value('return_mode', self._config.return_mode)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -176,8 +211,6 @@ class ConfigurationManager(QObject):
             self.set_publish_rate(20.0)
             
         dead_zone_value = settings.value('dead_zone')
-        if dead_zone_value is None:
-            dead_zone_value = settings.value('radial_dead_zone')
         dead_zone = safe_convert(dead_zone_value, float, 0.05)
         try:
             self.set_dead_zone(dead_zone)
@@ -185,8 +218,6 @@ class ConfigurationManager(QObject):
             self.set_dead_zone(0.05)
 
         dead_zone_x_value = settings.value('dead_zone_x')
-        if dead_zone_x_value is None:
-            dead_zone_x_value = settings.value('dead_zone_horizontal')
         dead_zone_x = safe_convert(dead_zone_x_value, float, 0.0)
         try:
             self.set_dead_zone_x(dead_zone_x)
@@ -194,8 +225,6 @@ class ConfigurationManager(QObject):
             self.set_dead_zone_x(0.0)
 
         dead_zone_y_value = settings.value('dead_zone_y')
-        if dead_zone_y_value is None:
-            dead_zone_y_value = settings.value('dead_zone_vertical')
         dead_zone_y = safe_convert(dead_zone_y_value, float, 0.0)
         try:
             self.set_dead_zone_y(dead_zone_y)
@@ -215,3 +244,9 @@ class ConfigurationManager(QObject):
             self.set_expo_y(expo_y)
         except ValueError:
             self.set_expo_y(0.0)
+
+        return_mode = settings.value('return_mode', RETURN_MODE_BOTH)
+        try:
+            self.set_return_mode(return_mode)
+        except ValueError:
+            self.set_return_mode(RETURN_MODE_BOTH)
