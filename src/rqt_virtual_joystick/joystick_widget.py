@@ -14,7 +14,13 @@ from python_qt_binding.QtGui import (
 )
 from python_qt_binding.QtWidgets import QWidget
 
-from .config_manager import ConfigurationManager
+from .config_manager import (
+    ConfigurationManager,
+    RETURN_MODE_BOTH,
+    RETURN_MODE_HORIZONTAL,
+    RETURN_MODE_NONE,
+    RETURN_MODE_VERTICAL,
+)
 
 
 class JoystickWidget(QWidget):
@@ -43,6 +49,7 @@ class JoystickWidget(QWidget):
         self._config_manager.rate_changed.connect(self._on_rate_changed)
         self._config_manager.dead_zone_changed.connect(self._on_dead_zone_changed)
         self._config_manager.expo_changed.connect(self._on_expo_changed)
+        self._config_manager.return_mode_changed.connect(self._on_return_mode_changed)
         self._on_rate_changed(self._config_manager.get_publish_rate())
 
     def _on_rate_changed(self, rate_hz: float):
@@ -62,6 +69,10 @@ class JoystickWidget(QWidget):
     def _on_expo_changed(self) -> None:
         self._set_position(*self._raw_position, emit_signal=True)
         self.update()
+
+    def _on_return_mode_changed(self, _mode: str) -> None:
+        if not self._pressed:
+            self._apply_return_to_center(emit_signal=True)
 
     def sizeHint(self) -> QSize:
         return QSize(250, 250)
@@ -497,7 +508,7 @@ class JoystickWidget(QWidget):
         if event.button() == Qt.LeftButton:
             self._pressed = False
             self._stop_update_timer()
-            self._set_position(0.0, 0.0, emit_signal=True)
+            self._apply_return_to_center(emit_signal=True)
 
     def keyPressEvent(self, event):  # noqa: D401 - Qt override
         x, y = self._position
@@ -615,6 +626,21 @@ class JoystickWidget(QWidget):
     def _emit_position_if_needed(self):
         if self._pressed and not self._is_in_dead_zone:
             self.position_changed.emit(*self._position)
+
+    def _apply_return_to_center(self, emit_signal: bool = False) -> None:
+        mode = self._config_manager.get_return_mode()
+
+        x, y = self._position
+        if mode == RETURN_MODE_BOTH:
+            x, y = 0.0, 0.0
+        elif mode == RETURN_MODE_HORIZONTAL:
+            x = 0.0
+        elif mode == RETURN_MODE_VERTICAL:
+            y = 0.0
+        elif mode == RETURN_MODE_NONE:
+            return
+
+        self._set_position(x, y, emit_signal=emit_signal)
 
     def get_position(self) -> Tuple[float, float]:
         return self._position

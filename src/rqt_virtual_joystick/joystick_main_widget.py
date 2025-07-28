@@ -10,7 +10,13 @@ from python_qt_binding.QtWidgets import (
 )
 
 from .joystick_widget import JoystickWidget
-from .config_manager import ConfigurationManager
+from .config_manager import (
+    ConfigurationManager,
+    RETURN_MODE_BOTH,
+    RETURN_MODE_HORIZONTAL,
+    RETURN_MODE_NONE,
+    RETURN_MODE_VERTICAL,
+)
 from .joy_publisher import JoyPublisherService
 
 
@@ -133,6 +139,23 @@ class JoystickMainWidget(QWidget):
         self._expo_y_label.setMinimumWidth(30)
         layout.addWidget(self._expo_y_label, row, 4)
 
+        # Add Auto Return control
+        row += 1
+        layout.addWidget(QLabel("Auto Return:"), row, 0)
+        self._return_mode_combo = QComboBox()
+        self._return_mode_combo.addItem("Both Axes", RETURN_MODE_BOTH)
+        self._return_mode_combo.addItem("X Only", RETURN_MODE_HORIZONTAL)
+        self._return_mode_combo.addItem("Y Only", RETURN_MODE_VERTICAL)
+        self._return_mode_combo.addItem("Disabled", RETURN_MODE_NONE)
+        current_mode = self._config_manager.get_return_mode()
+        index = max(0, self._return_mode_combo.findData(current_mode))
+        self._return_mode_combo.setCurrentIndex(index)
+        layout.addWidget(self._return_mode_combo, row, 1, 1, 3)
+
+        self._return_mode_label = QLabel(self._return_mode_combo.currentText())
+        self._return_mode_label.setMinimumWidth(80)
+        layout.addWidget(self._return_mode_label, row, 4)
+
         group.setLayout(layout)
         return group
 
@@ -149,9 +172,11 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_y_slider.valueChanged.connect(self._on_dead_zone_y_changed)
         self._expo_x_slider.valueChanged.connect(self._on_expo_x_changed)
         self._expo_y_slider.valueChanged.connect(self._on_expo_y_changed)
+        self._return_mode_combo.currentIndexChanged.connect(self._on_return_mode_changed)
 
         self._config_manager.dead_zone_changed.connect(self._update_control_values)
         self._config_manager.expo_changed.connect(self._update_control_values)
+        self._config_manager.return_mode_changed.connect(self._on_return_mode_updated)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
         self._publisher_service.publisher_error.connect(self._on_publisher_error)
@@ -246,6 +271,7 @@ class JoystickMainWidget(QWidget):
         dead_zone_y_value = int(self._config_manager.get_dead_zone_y() * 100)
         expo_x_value = int(self._config_manager.get_expo_x())
         expo_y_value = int(self._config_manager.get_expo_y())
+        return_mode = self._config_manager.get_return_mode()
 
         self._dead_zone_slider.blockSignals(True)
         self._dead_zone_slider.setValue(dead_zone_value)
@@ -272,6 +298,12 @@ class JoystickMainWidget(QWidget):
         self._expo_y_slider.blockSignals(False)
         self._expo_y_label.setText(f"{expo_y_value}%")
 
+        self._return_mode_combo.blockSignals(True)
+        index = max(0, self._return_mode_combo.findData(return_mode))
+        self._return_mode_combo.setCurrentIndex(index)
+        self._return_mode_combo.blockSignals(False)
+        self._return_mode_label.setText(self._return_mode_combo.currentText())
+
     @pyqtSlot(int)
     def _on_expo_x_changed(self, value: int):
         try:
@@ -287,3 +319,19 @@ class JoystickMainWidget(QWidget):
             self._expo_y_label.setText(f"{value}%")
         except ValueError:
             pass
+
+    @pyqtSlot(int)
+    def _on_return_mode_changed(self, index: int):
+        mode = self._return_mode_combo.itemData(index)
+        try:
+            self._config_manager.set_return_mode(mode)
+        except ValueError:
+            self._on_return_mode_updated(self._config_manager.get_return_mode())
+
+    @pyqtSlot(str)
+    def _on_return_mode_updated(self, mode: str):
+        index = max(0, self._return_mode_combo.findData(mode))
+        self._return_mode_combo.blockSignals(True)
+        self._return_mode_combo.setCurrentIndex(index)
+        self._return_mode_combo.blockSignals(False)
+        self._return_mode_label.setText(self._return_mode_combo.currentText())
