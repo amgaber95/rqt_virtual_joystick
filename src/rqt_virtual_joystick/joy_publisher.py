@@ -46,6 +46,7 @@ class JoyPublisherService(QObject):
         self._node = ros_node
         self._config_manager = config_manager
         self._publisher: Optional[rclpy.publisher.Publisher] = None
+        self._enabled = self._config_manager.is_publish_enabled()
         
         # Current joystick state
         self._current_axes = [0.0] * 6  # 6 standard axes
@@ -66,6 +67,7 @@ class JoyPublisherService(QObject):
         """Connect to configuration manager signals."""
         self._config_manager.topic_changed.connect(self._on_topic_changed)
         self._config_manager.rate_changed.connect(self._on_rate_changed)
+        self._config_manager.publish_enabled_changed.connect(self._on_enabled_changed)
         
     def _create_publisher(self) -> bool:
         """
@@ -106,19 +108,19 @@ class JoyPublisherService(QObject):
         """Update the publishing timer rate based on configuration."""
         rate_hz = self._config_manager.get_publish_rate()
         interval_ms = int(1000.0 / rate_hz)
-        
+
         if self._publish_timer.isActive():
             self._publish_timer.stop()
-            
+
         self._publish_timer.setInterval(interval_ms)
-        
+
         # Restart timer to ensure continuous publishing at the configured rate
-        if self._publisher:
+        if self._publisher and self._enabled:
             self._publish_timer.start()
         
     def _publish_joy_message(self):
         """Publish the current joystick state as a Joy message."""
-        if not self._publisher:
+        if not self._publisher or not self._enabled:
             return
             
         try:
@@ -162,7 +164,7 @@ class JoyPublisherService(QObject):
                     self._current_axes[i + 2] = max(-1.0, min(1.0, value))
                     
         # Start publishing if not already active
-        if not self._publish_timer.isActive() and self._publisher:
+        if self._enabled and not self._publish_timer.isActive() and self._publisher:
             self._publish_timer.start()
             
     def update_button(self, button_index: int, pressed: bool):
@@ -181,23 +183,34 @@ class JoyPublisherService(QObject):
 
         self._current_buttons[button_index] = 1 if pressed else 0
 
-        if not self._publish_timer.isActive() and self._publisher:
+        if self._enabled and not self._publish_timer.isActive() and self._publisher:
             self._publish_timer.start()
                 
     def start_publishing(self):
         """Start continuous publishing."""
-        if self._publisher and not self._publish_timer.isActive():
+        if self._enabled and self._publisher and not self._publish_timer.isActive():
             self._publish_timer.start()
             
     def stop_publishing(self):
         """Stop continuous publishing."""
         if self._publish_timer.isActive():
             self._publish_timer.stop()
-            
+
     def is_publishing(self) -> bool:
         """Check if currently publishing."""
         return self._publish_timer.isActive()
         
+    def _on_enabled_changed(self, enabled: bool):
+        self._enabled = enabled
+        if not enabled:
+            if self._publish_timer.isActive():
+                self._publish_timer.stop()
+        else:
+            # Publish current state immediately then resume timer
+            self._publish_joy_message()
+            if self._publisher and not self._publish_timer.isActive():
+                self._publish_timer.start()
+
     def get_current_topic(self) -> str:
         """Get the current topic name."""
         return self._config_manager.get_topic_name()

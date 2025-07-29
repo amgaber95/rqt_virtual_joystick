@@ -22,6 +22,7 @@ class JoystickConfig:
     dead_zone_y: float = 0.0  # Y-axis dead zone (0.0-0.9)
     expo_x: float = 0.0  # X-axis exponential response (0-100%)
     expo_y: float = 0.0  # Y-axis exponential response (0-100%)
+    publish_enabled: bool = True
     return_mode: str = RETURN_MODE_BOTH
 
     def __post_init__(self):
@@ -49,6 +50,9 @@ class JoystickConfig:
         if not 0.0 <= self.expo_y <= 100.0:
             raise ValueError("Y expo must be between 0.0 and 100.0%")
 
+        if not 0.0 <= self.expo_y <= 100.0:
+            raise ValueError("Y expo must be between 0.0 and 100.0%")
+
         valid_modes = [
             RETURN_MODE_BOTH,
             RETURN_MODE_HORIZONTAL,
@@ -66,6 +70,7 @@ class ConfigurationManager(QObject):
     rate_changed = pyqtSignal(float)
     dead_zone_changed = pyqtSignal()
     expo_changed = pyqtSignal()
+    publish_enabled_changed = pyqtSignal(bool)
     return_mode_changed = pyqtSignal(str)
 
     def __init__(self):
@@ -164,6 +169,16 @@ class ConfigurationManager(QObject):
             self.expo_changed.emit()
             self.config_changed.emit()
 
+    def is_publish_enabled(self) -> bool:
+        return self._config.publish_enabled
+
+    def set_publish_enabled(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled != self._config.publish_enabled:
+            self._config.publish_enabled = enabled
+            self.publish_enabled_changed.emit(enabled)
+            self.config_changed.emit()
+
     def get_return_mode(self) -> str:
         return self._config.return_mode
 
@@ -190,6 +205,7 @@ class ConfigurationManager(QObject):
         settings.set_value('dead_zone_y', self._config.dead_zone_y)
         settings.set_value('expo_x', self._config.expo_x)
         settings.set_value('expo_y', self._config.expo_y)
+        settings.set_value('publish_enabled', self._config.publish_enabled)
         settings.set_value('return_mode', self._config.return_mode)
 
     def restore_settings(self, settings) -> None:
@@ -244,6 +260,15 @@ class ConfigurationManager(QObject):
             self.set_expo_y(expo_y)
         except ValueError:
             self.set_expo_y(0.0)
+
+        publish_enabled_value = settings.value('publish_enabled')
+        if isinstance(publish_enabled_value, str):
+            publish_enabled = publish_enabled_value.lower() in ('1', 'true', 'yes', 'on')
+        elif publish_enabled_value is None:
+            publish_enabled = True
+        else:
+            publish_enabled = bool(publish_enabled_value)
+        self.set_publish_enabled(publish_enabled)
 
         return_mode = settings.value('return_mode', RETURN_MODE_BOTH)
         try:
