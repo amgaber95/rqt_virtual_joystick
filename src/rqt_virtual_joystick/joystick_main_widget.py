@@ -5,6 +5,7 @@ from python_qt_binding.QtWidgets import (
     QLabel,
     QSlider,
     QComboBox,
+    QCheckBox,
     QGroupBox,
     QGridLayout,
 )
@@ -66,7 +67,11 @@ class JoystickMainWidget(QWidget):
         self._topic_combo.setEditable(True)
         self._topic_combo.addItems(["joy", "teleop/joy", "input/joy"])
         self._topic_combo.setCurrentText(self._config_manager.get_topic_name())
-        layout.addWidget(self._topic_combo, row, 1, 1, 4)
+        layout.addWidget(self._topic_combo, row, 1, 1, 3)
+
+        self._publish_checkbox = QCheckBox("Publish")
+        self._publish_checkbox.setChecked(self._config_manager.is_publish_enabled())
+        layout.addWidget(self._publish_checkbox, row, 4)
 
         row += 1
         layout.addWidget(QLabel("Rate:"), row, 0)
@@ -172,10 +177,12 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_y_slider.valueChanged.connect(self._on_dead_zone_y_changed)
         self._expo_x_slider.valueChanged.connect(self._on_expo_x_changed)
         self._expo_y_slider.valueChanged.connect(self._on_expo_y_changed)
+        self._publish_checkbox.toggled.connect(self._on_publish_toggled)
         self._return_mode_combo.currentIndexChanged.connect(self._on_return_mode_changed)
 
         self._config_manager.dead_zone_changed.connect(self._update_control_values)
         self._config_manager.expo_changed.connect(self._update_control_values)
+        self._config_manager.publish_enabled_changed.connect(self._on_publish_enabled_changed)
         self._config_manager.return_mode_changed.connect(self._on_return_mode_updated)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
@@ -272,6 +279,7 @@ class JoystickMainWidget(QWidget):
         expo_x_value = int(self._config_manager.get_expo_x())
         expo_y_value = int(self._config_manager.get_expo_y())
         return_mode = self._config_manager.get_return_mode()
+        publish_enabled = self._config_manager.is_publish_enabled()
 
         self._dead_zone_slider.blockSignals(True)
         self._dead_zone_slider.setValue(dead_zone_value)
@@ -304,6 +312,10 @@ class JoystickMainWidget(QWidget):
         self._return_mode_combo.blockSignals(False)
         self._return_mode_label.setText(self._return_mode_combo.currentText())
 
+        self._publish_checkbox.blockSignals(True)
+        self._publish_checkbox.setChecked(publish_enabled)
+        self._publish_checkbox.blockSignals(False)
+
     @pyqtSlot(int)
     def _on_expo_x_changed(self, value: int):
         try:
@@ -319,6 +331,16 @@ class JoystickMainWidget(QWidget):
             self._expo_y_label.setText(f"{value}%")
         except ValueError:
             pass
+
+    @pyqtSlot(bool)
+    def _on_publish_toggled(self, enabled: bool):
+        self._config_manager.set_publish_enabled(enabled)
+
+    @pyqtSlot(bool)
+    def _on_publish_enabled_changed(self, enabled: bool):
+        self._publish_checkbox.blockSignals(True)
+        self._publish_checkbox.setChecked(enabled)
+        self._publish_checkbox.blockSignals(False)
 
     @pyqtSlot(int)
     def _on_return_mode_changed(self, index: int):
