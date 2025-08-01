@@ -2,15 +2,18 @@ from python_qt_binding.QtCore import Qt, pyqtSlot
 from python_qt_binding.QtWidgets import (
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
     QSlider,
     QComboBox,
     QCheckBox,
     QGroupBox,
     QGridLayout,
+    QSizePolicy,
 )
 
 from .joystick_widget import JoystickWidget
+from .controller_buttons_widget import ControllerButtonsWidget
 from .config_manager import (
     ConfigurationManager,
     RETURN_MODE_BOTH,
@@ -32,7 +35,7 @@ class JoystickMainWidget(QWidget):
         self._publisher_service = JoyPublisherService(ros_node, self._config_manager)
         self._committed_topic_name = self._config_manager.get_topic_name()
 
-        self.setMaximumWidth(400)
+        self.setMaximumWidth(700)  # Increased to accommodate joystick + buttons
 
         self._init_ui()
         self._connect_signals()
@@ -40,8 +43,20 @@ class JoystickMainWidget(QWidget):
     def _init_ui(self):
         main_layout = QVBoxLayout()
 
+        # Create horizontal layout for joystick and controller buttons
+        joystick_layout = QHBoxLayout()
+        
         self._joystick_widget = JoystickWidget(self._config_manager)
-        main_layout.addWidget(self._joystick_widget, 1)
+        joystick_layout.addWidget(self._joystick_widget, 1)
+        
+        # Add controller buttons widget
+        self._controller_buttons_widget = ControllerButtonsWidget()
+        joystick_layout.addWidget(self._controller_buttons_widget, 0)
+        
+        # Add some spacing between joystick and buttons
+        # joystick_layout.setSpacing(0)
+        
+        main_layout.addLayout(joystick_layout, 1)
 
         controls_widget = self._create_controls()
         main_layout.addWidget(controls_widget, 0)
@@ -54,13 +69,16 @@ class JoystickMainWidget(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(8)
         layout.addWidget(self._create_compact_controls())
+        layout.addStretch(1)
         controls_widget.setLayout(layout)
+        controls_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         return controls_widget
 
     def _create_compact_controls(self) -> QGroupBox:
         group = QGroupBox("Controls")
+        group.setSizePolicy(group.sizePolicy().horizontalPolicy(), group.sizePolicy().Minimum)
         layout = QGridLayout()
-        layout.setVerticalSpacing(4)
+        layout.setVerticalSpacing(8)
 
         row = 0
         layout.addWidget(QLabel("Topic:"), row, 0)
@@ -187,6 +205,7 @@ class JoystickMainWidget(QWidget):
         self._config_manager.return_mode_changed.connect(self._on_return_mode_updated)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
+        self._controller_buttons_widget.button_pressed.connect(self._on_button_pressed)
         self._publisher_service.publisher_error.connect(self._on_publisher_error)
 
     @pyqtSlot(str)
@@ -246,6 +265,11 @@ class JoystickMainWidget(QWidget):
     def _on_joystick_moved(self, x: float, y: float):
         self._publisher_service.update_axes(x, y)
 
+    @pyqtSlot(int, bool)
+    def _on_button_pressed(self, button_index: int, pressed: bool):
+        """Handle Xbox button press/release events."""
+        self._publisher_service.update_button(button_index, pressed)
+
     @pyqtSlot(str)
     def _on_publisher_error(self, error_msg: str):
         self._ros_node.get_logger().error(f"Publisher error: {error_msg}")
@@ -271,6 +295,7 @@ class JoystickMainWidget(QWidget):
     def shutdown(self):
         self._publisher_service.shutdown()
         self._joystick_widget.reset_position()
+        self._controller_buttons_widget.reset_buttons()
 
     @pyqtSlot()
     def _update_control_values(self):
