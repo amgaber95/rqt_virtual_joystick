@@ -44,7 +44,8 @@ class JoystickMainWidget(QWidget):
         main_layout.addWidget(self._joystick_widget, 1)
 
         controls_widget = self._create_controls()
-        main_layout.addWidget(controls_widget)
+        main_layout.addWidget(controls_widget, 0)
+        main_layout.addStretch(1)
 
         self.setLayout(main_layout)
 
