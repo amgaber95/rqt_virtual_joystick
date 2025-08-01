@@ -68,15 +68,15 @@ class JoystickMainWidget(QWidget):
         controls_widget = QWidget()
         layout = QVBoxLayout()
         layout.setSpacing(8)
-        layout.addWidget(self._create_compact_controls())
+        layout.addWidget(self._create_publishing_group())
+        layout.addWidget(self._create_joystick_group())
         layout.addStretch(1)
         controls_widget.setLayout(layout)
         controls_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         return controls_widget
 
-    def _create_compact_controls(self) -> QGroupBox:
-        group = QGroupBox("Controls")
-        group.setSizePolicy(group.sizePolicy().horizontalPolicy(), group.sizePolicy().Minimum)
+    def _create_publishing_group(self) -> QGroupBox:
+        group = QGroupBox("Publishing")
         layout = QGridLayout()
         layout.setVerticalSpacing(8)
 
@@ -86,84 +86,87 @@ class JoystickMainWidget(QWidget):
         self._topic_combo.setEditable(True)
         self._topic_combo.addItems(["joy", "teleop/joy", "input/joy"])
         self._topic_combo.setCurrentText(self._config_manager.get_topic_name())
-        layout.addWidget(self._topic_combo, row, 1, 1, 3)
+        layout.addWidget(self._topic_combo, row, 1, 1, 2)
 
         self._publish_checkbox = QCheckBox("Publish")
         self._publish_checkbox.setChecked(self._config_manager.is_publish_enabled())
-        layout.addWidget(self._publish_checkbox, row, 4)
+        layout.addWidget(self._publish_checkbox, row, 3)
 
         row += 1
         layout.addWidget(QLabel("Rate:"), row, 0)
         self._rate_slider = QSlider(Qt.Horizontal)
         self._rate_slider.setRange(1, 100)
         self._rate_slider.setValue(int(self._config_manager.get_publish_rate()))
-        layout.addWidget(self._rate_slider, row, 1, 1, 3)
+        layout.addWidget(self._rate_slider, row, 1, 1, 2)
 
         self._rate_label = QLabel(f"{int(self._config_manager.get_publish_rate())} Hz")
-        self._rate_label.setMinimumWidth(30)
-        layout.addWidget(self._rate_label, row, 4)
-        
-        # Add dead zone control
-        row += 1
+        self._rate_label.setMinimumWidth(40)
+        layout.addWidget(self._rate_label, row, 3)
+
+        group.setLayout(layout)
+        self._apply_groupbox_style(group)
+        return group
+
+    def _create_joystick_group(self) -> QGroupBox:
+        group = QGroupBox("Joystick")
+        layout = QGridLayout()
+        layout.setVerticalSpacing(8)
+
+        row = 0
         layout.addWidget(QLabel("Dead Zone:"), row, 0)
         self._dead_zone_slider = QSlider(Qt.Horizontal)
-        self._dead_zone_slider.setRange(0, 90)  # 0-90% of full range
+        self._dead_zone_slider.setRange(0, 90)
         self._dead_zone_slider.setValue(int(self._config_manager.get_dead_zone() * 100))
-        layout.addWidget(self._dead_zone_slider, row, 1, 1, 3)
+        layout.addWidget(self._dead_zone_slider, row, 1, 1, 2)
 
         self._dead_zone_label = QLabel(f"{int(self._config_manager.get_dead_zone() * 100)}%")
-        self._dead_zone_label.setMinimumWidth(30)
-        layout.addWidget(self._dead_zone_label, row, 4)
+        self._dead_zone_label.setMinimumWidth(40)
+        layout.addWidget(self._dead_zone_label, row, 3)
 
-        # Add X dead zone control
         row += 1
         layout.addWidget(QLabel("Dead Zone X:"), row, 0)
         self._dead_zone_x_slider = QSlider(Qt.Horizontal)
         self._dead_zone_x_slider.setRange(0, 90)
         self._dead_zone_x_slider.setValue(int(self._config_manager.get_dead_zone_x() * 100))
-        layout.addWidget(self._dead_zone_x_slider, row, 1, 1, 3)
+        layout.addWidget(self._dead_zone_x_slider, row, 1, 1, 2)
 
         self._dead_zone_x_label = QLabel(f"{int(self._config_manager.get_dead_zone_x() * 100)}%")
-        self._dead_zone_x_label.setMinimumWidth(30)
-        layout.addWidget(self._dead_zone_x_label, row, 4)
+        self._dead_zone_x_label.setMinimumWidth(40)
+        layout.addWidget(self._dead_zone_x_label, row, 3)
 
-        # Add Y dead zone control
         row += 1
         layout.addWidget(QLabel("Dead Zone Y:"), row, 0)
         self._dead_zone_y_slider = QSlider(Qt.Horizontal)
         self._dead_zone_y_slider.setRange(0, 90)
         self._dead_zone_y_slider.setValue(int(self._config_manager.get_dead_zone_y() * 100))
-        layout.addWidget(self._dead_zone_y_slider, row, 1, 1, 3)
+        layout.addWidget(self._dead_zone_y_slider, row, 1, 1, 2)
 
         self._dead_zone_y_label = QLabel(f"{int(self._config_manager.get_dead_zone_y() * 100)}%")
-        self._dead_zone_y_label.setMinimumWidth(30)
-        layout.addWidget(self._dead_zone_y_label, row, 4)
+        self._dead_zone_y_label.setMinimumWidth(40)
+        layout.addWidget(self._dead_zone_y_label, row, 3)
 
-        # Add Expo X control
         row += 1
         layout.addWidget(QLabel("Expo X:"), row, 0)
         self._expo_x_slider = QSlider(Qt.Horizontal)
         self._expo_x_slider.setRange(0, 100)
         self._expo_x_slider.setValue(int(self._config_manager.get_expo_x()))
-        layout.addWidget(self._expo_x_slider, row, 1, 1, 3)
+        layout.addWidget(self._expo_x_slider, row, 1, 1, 2)
 
         self._expo_x_label = QLabel(f"{int(self._config_manager.get_expo_x())}%")
-        self._expo_x_label.setMinimumWidth(30)
-        layout.addWidget(self._expo_x_label, row, 4)
+        self._expo_x_label.setMinimumWidth(40)
+        layout.addWidget(self._expo_x_label, row, 3)
 
-        # Add Expo Y control
         row += 1
         layout.addWidget(QLabel("Expo Y:"), row, 0)
         self._expo_y_slider = QSlider(Qt.Horizontal)
         self._expo_y_slider.setRange(0, 100)
         self._expo_y_slider.setValue(int(self._config_manager.get_expo_y()))
-        layout.addWidget(self._expo_y_slider, row, 1, 1, 3)
+        layout.addWidget(self._expo_y_slider, row, 1, 1, 2)
 
         self._expo_y_label = QLabel(f"{int(self._config_manager.get_expo_y())}%")
-        self._expo_y_label.setMinimumWidth(30)
-        layout.addWidget(self._expo_y_label, row, 4)
+        self._expo_y_label.setMinimumWidth(40)
+        layout.addWidget(self._expo_y_label, row, 3)
 
-        # Add Auto Return control
         row += 1
         layout.addWidget(QLabel("Auto Return:"), row, 0)
         self._return_mode_combo = QComboBox()
@@ -174,14 +177,34 @@ class JoystickMainWidget(QWidget):
         current_mode = self._config_manager.get_return_mode()
         index = max(0, self._return_mode_combo.findData(current_mode))
         self._return_mode_combo.setCurrentIndex(index)
-        layout.addWidget(self._return_mode_combo, row, 1, 1, 3)
+        layout.addWidget(self._return_mode_combo, row, 1, 1, 2)
 
         self._return_mode_label = QLabel(self._return_mode_combo.currentText())
         self._return_mode_label.setMinimumWidth(80)
-        layout.addWidget(self._return_mode_label, row, 4)
+        layout.addWidget(self._return_mode_label, row, 3)
 
         group.setLayout(layout)
+        self._apply_groupbox_style(group)
         return group
+
+    @staticmethod
+    def _apply_groupbox_style(group: QGroupBox) -> None:
+        group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #3A3A3A;
+                margin-top: 0.5em;
+                padding: 0px;
+            }
+
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 8px;
+                top: -1px;
+                padding: 0px 4px;
+            }
+        """)
 
     def _connect_signals(self):
         self._topic_combo.activated[str].connect(self._on_topic_activated)
