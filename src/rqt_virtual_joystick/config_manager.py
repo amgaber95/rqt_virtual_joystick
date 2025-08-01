@@ -23,6 +23,7 @@ class JoystickConfig:
     expo_x: float = 0.0  # X-axis exponential response (0-100%)
     expo_y: float = 0.0  # Y-axis exponential response (0-100%)
     publish_enabled: bool = True
+    sticky_buttons: bool = False
     return_mode: str = RETURN_MODE_BOTH
 
     def __post_init__(self):
@@ -71,6 +72,7 @@ class ConfigurationManager(QObject):
     dead_zone_changed = pyqtSignal()
     expo_changed = pyqtSignal()
     publish_enabled_changed = pyqtSignal(bool)
+    sticky_buttons_changed = pyqtSignal(bool)
     return_mode_changed = pyqtSignal(str)
 
     def __init__(self):
@@ -179,6 +181,16 @@ class ConfigurationManager(QObject):
             self.publish_enabled_changed.emit(enabled)
             self.config_changed.emit()
 
+    def is_sticky_buttons_enabled(self) -> bool:
+        return self._config.sticky_buttons
+
+    def set_sticky_buttons(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled != self._config.sticky_buttons:
+            self._config.sticky_buttons = enabled
+            self.sticky_buttons_changed.emit(enabled)
+            self.config_changed.emit()
+
     def get_return_mode(self) -> str:
         return self._config.return_mode
 
@@ -207,6 +219,7 @@ class ConfigurationManager(QObject):
         settings.set_value('expo_y', self._config.expo_y)
         settings.set_value('publish_enabled', self._config.publish_enabled)
         settings.set_value('return_mode', self._config.return_mode)
+        settings.set_value('sticky_buttons', self._config.sticky_buttons)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -275,3 +288,12 @@ class ConfigurationManager(QObject):
             self.set_return_mode(return_mode)
         except ValueError:
             self.set_return_mode(RETURN_MODE_BOTH)
+
+        sticky_value = settings.value('sticky_buttons')
+        if isinstance(sticky_value, str):
+            sticky_enabled = sticky_value.lower() in ('1', 'true', 'yes', 'on')
+        elif sticky_value is None:
+            sticky_enabled = False
+        else:
+            sticky_enabled = bool(sticky_value)
+        self.set_sticky_buttons(sticky_enabled)
