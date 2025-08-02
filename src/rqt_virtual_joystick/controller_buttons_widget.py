@@ -16,6 +16,7 @@ class ControllerButton(QWidget):
         self.button_index = button_index
         self.base_color = color
         self.is_pressed = False
+        self._sticky = False
         # Make buttons slightly flexible in size
         self.setMinimumSize(40, 40)
         self.setMaximumSize(60, 60)
@@ -104,12 +105,17 @@ class ControllerButton(QWidget):
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.is_pressed = True
-            self.update()
-            self.pressed.emit(self.button_index, True)
-    
+            if self._sticky:
+                self.is_pressed = not self.is_pressed
+                self.update()
+                self.pressed.emit(self.button_index, self.is_pressed)
+            else:
+                self.is_pressed = True
+                self.update()
+                self.pressed.emit(self.button_index, True)
+
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self.is_pressed:
+        if event.button() == Qt.LeftButton and not self._sticky and self.is_pressed:
             self.is_pressed = False
             self.update()
             self.pressed.emit(self.button_index, False)
@@ -117,6 +123,13 @@ class ControllerButton(QWidget):
     def reset_position(self):
         """Reset button to unpressed state."""
         if self.is_pressed:
+            self.is_pressed = False
+            self.update()
+
+    def set_sticky(self, enabled: bool):
+        self._sticky = enabled
+        if not enabled and self.is_pressed:
+            # When disabling sticky, ensure button returns to neutral.
             self.is_pressed = False
             self.update()
 
@@ -132,16 +145,15 @@ class ControllerButtonsWidget(QWidget):
     BUTTON_X = 2
     BUTTON_Y = 3
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, sticky_buttons: bool = False):
         super().__init__(parent)
-        # Set a reasonable size range instead of fixed size for flexibility
+        # Set a reasonable size range
         self.setMinimumSize(200, 200)
-        # self.setMaximumSize(180, 180)
-        # self.setFixedSize(180, 20)
-        # self.resize(150, 150)  # Default size
         self._pressed_buttons: Set[int] = set()
         self._buttons: Dict[str, ControllerButton] = {}
+        self._sticky_buttons = sticky_buttons
         self._init_ui()
+        self.set_sticky_buttons(sticky_buttons)
         
     def _init_ui(self):
         """Initialize the UI with grid layout."""
@@ -268,3 +280,16 @@ class ControllerButtonsWidget(QWidget):
         # elif layout_type == "square": 
         #     # Arrange in 2x2 grid
         pass
+
+    def set_sticky_buttons(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        previously_enabled = self._sticky_buttons
+        self._sticky_buttons = enabled
+
+        for button in self._buttons.values():
+            button.set_sticky(enabled)
+
+        if not enabled and previously_enabled and self._pressed_buttons:
+            for button_index in list(self._pressed_buttons):
+                self.button_pressed.emit(button_index, False)
+            self._pressed_buttons.clear()
