@@ -50,7 +50,9 @@ class JoystickMainWidget(QWidget):
         joystick_layout.addWidget(self._joystick_widget, 1)
         
         # Add controller buttons widget
-        self._controller_buttons_widget = ControllerButtonsWidget()
+        self._controller_buttons_widget = ControllerButtonsWidget(
+            sticky_buttons=self._config_manager.is_sticky_buttons_enabled()
+        )
         joystick_layout.addWidget(self._controller_buttons_widget, 0)
         
         # Add some spacing between joystick and buttons
@@ -70,6 +72,7 @@ class JoystickMainWidget(QWidget):
         layout.setSpacing(8)
         layout.addWidget(self._create_publishing_group())
         layout.addWidget(self._create_joystick_group())
+        layout.addWidget(self._create_buttons_group())
         layout.addStretch(1)
         controls_widget.setLayout(layout)
         controls_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -187,6 +190,20 @@ class JoystickMainWidget(QWidget):
         self._apply_groupbox_style(group)
         return group
 
+    def _create_buttons_group(self) -> QGroupBox:
+        group = QGroupBox("Buttons")
+        layout = QGridLayout()
+        layout.setVerticalSpacing(8)
+
+        row = 0
+        self._sticky_buttons_checkbox = QCheckBox("Sticky buttons")
+        self._sticky_buttons_checkbox.setChecked(self._config_manager.is_sticky_buttons_enabled())
+        layout.addWidget(self._sticky_buttons_checkbox, row, 0, 1, 2)
+
+        group.setLayout(layout)
+        self._apply_groupbox_style(group)
+        return group
+
     @staticmethod
     def _apply_groupbox_style(group: QGroupBox) -> None:
         group.setStyleSheet("""
@@ -221,11 +238,13 @@ class JoystickMainWidget(QWidget):
         self._expo_y_slider.valueChanged.connect(self._on_expo_y_changed)
         self._publish_checkbox.toggled.connect(self._on_publish_toggled)
         self._return_mode_combo.currentIndexChanged.connect(self._on_return_mode_changed)
+        self._sticky_buttons_checkbox.toggled.connect(self._on_sticky_buttons_toggled)
 
         self._config_manager.dead_zone_changed.connect(self._update_control_values)
         self._config_manager.expo_changed.connect(self._update_control_values)
         self._config_manager.publish_enabled_changed.connect(self._on_publish_enabled_changed)
         self._config_manager.return_mode_changed.connect(self._on_return_mode_updated)
+        self._config_manager.sticky_buttons_changed.connect(self._on_sticky_buttons_changed)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
         self._controller_buttons_widget.button_pressed.connect(self._on_button_pressed)
@@ -328,6 +347,7 @@ class JoystickMainWidget(QWidget):
         expo_x_value = int(self._config_manager.get_expo_x())
         expo_y_value = int(self._config_manager.get_expo_y())
         return_mode = self._config_manager.get_return_mode()
+        sticky_enabled = self._config_manager.is_sticky_buttons_enabled()
         publish_enabled = self._config_manager.is_publish_enabled()
 
         self._dead_zone_slider.blockSignals(True)
@@ -365,6 +385,11 @@ class JoystickMainWidget(QWidget):
         self._publish_checkbox.setChecked(publish_enabled)
         self._publish_checkbox.blockSignals(False)
 
+        self._sticky_buttons_checkbox.blockSignals(True)
+        self._sticky_buttons_checkbox.setChecked(sticky_enabled)
+        self._sticky_buttons_checkbox.blockSignals(False)
+        self._controller_buttons_widget.set_sticky_buttons(sticky_enabled)
+
     @pyqtSlot(int)
     def _on_expo_x_changed(self, value: int):
         try:
@@ -390,6 +415,17 @@ class JoystickMainWidget(QWidget):
         self._publish_checkbox.blockSignals(True)
         self._publish_checkbox.setChecked(enabled)
         self._publish_checkbox.blockSignals(False)
+
+    @pyqtSlot(bool)
+    def _on_sticky_buttons_toggled(self, enabled: bool):
+        self._config_manager.set_sticky_buttons(enabled)
+
+    @pyqtSlot(bool)
+    def _on_sticky_buttons_changed(self, enabled: bool):
+        self._sticky_buttons_checkbox.blockSignals(True)
+        self._sticky_buttons_checkbox.setChecked(enabled)
+        self._sticky_buttons_checkbox.blockSignals(False)
+        self._controller_buttons_widget.set_sticky_buttons(enabled)
 
     @pyqtSlot(int)
     def _on_return_mode_changed(self, index: int):
