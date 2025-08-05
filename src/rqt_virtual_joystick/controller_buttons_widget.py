@@ -33,6 +33,8 @@ class ControllerButton(QWidget):
         self._draw_button_shadow(painter, center, radius)
         self._draw_button_body(painter, center, radius)
         self._draw_button_highlight(painter, center, radius)
+        if self.is_pressed:
+            self._draw_pressed_overlay(painter, center, radius)
         self._draw_button_text(painter, center)
         
     def _draw_button_shadow(self, painter, center, radius):
@@ -81,6 +83,31 @@ class ControllerButton(QWidget):
                 painter.setPen(Qt.NoPen)
                 highlight_center = QPoint(center.x() - 2, center.y() - 2)
                 painter.drawEllipse(highlight_center, highlight_radius, highlight_radius)
+
+    def _draw_pressed_overlay(self, painter, center, radius):
+        """Draw additional glow and ring to emphasize pressed state."""
+        painter.save()
+
+        draw_center = QPoint(center)
+        draw_center += QPoint(1, 1)
+
+        inner_radius = max(0, radius - 5)
+        if inner_radius > 0:
+            glow = QRadialGradient(draw_center, inner_radius)
+            glow.setColorAt(0.0, QColor(255, 255, 255, 160))
+            glow.setColorAt(0.5, self.base_color.lighter(150))
+            glow.setColorAt(1.0, QColor(self.base_color.red(), self.base_color.green(), self.base_color.blue(), 0))
+            painter.setBrush(QBrush(glow))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(draw_center, inner_radius, inner_radius)
+
+        ring_pen = QPen(self.base_color.lighter(170), 3)
+        ring_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(ring_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(draw_center, radius, radius)
+
+        painter.restore()
     
     def _draw_button_text(self, painter, center):
         """Draw the button text/label."""
