@@ -79,21 +79,24 @@ class JoystickMainWidget(QWidget):
         return controls_widget
 
     def _create_publishing_group(self) -> QGroupBox:
-        group = QGroupBox("Publishing")
+        group = QGroupBox("Joy Output")
         layout = QGridLayout()
         layout.setVerticalSpacing(8)
 
         row = 0
+        self._publish_label = QLabel("Publish:")
+        layout.addWidget(self._publish_label, row, 0)
+        self._publish_checkbox = QCheckBox("")
+        self._publish_checkbox.setChecked(self._config_manager.is_publish_enabled())
+        layout.addWidget(self._publish_checkbox, row, 1)
+
+        row += 1
         layout.addWidget(QLabel("Topic:"), row, 0)
         self._topic_combo = QComboBox()
         self._topic_combo.setEditable(True)
         self._topic_combo.addItems(["joy", "teleop/joy", "input/joy"])
         self._topic_combo.setCurrentText(self._config_manager.get_topic_name())
-        layout.addWidget(self._topic_combo, row, 1, 1, 2)
-
-        self._publish_checkbox = QCheckBox("Publish")
-        self._publish_checkbox.setChecked(self._config_manager.is_publish_enabled())
-        layout.addWidget(self._publish_checkbox, row, 3)
+        layout.addWidget(self._topic_combo, row, 1, 1, 3)
 
         row += 1
         layout.addWidget(QLabel("Rate:"), row, 0)
@@ -196,9 +199,11 @@ class JoystickMainWidget(QWidget):
         layout.setVerticalSpacing(8)
 
         row = 0
-        self._sticky_buttons_checkbox = QCheckBox("Sticky buttons")
+        self._sticky_buttons_label = QLabel("Sticky Buttons:")
+        layout.addWidget(self._sticky_buttons_label, row, 0)
+        self._sticky_buttons_checkbox = QCheckBox()
         self._sticky_buttons_checkbox.setChecked(self._config_manager.is_sticky_buttons_enabled())
-        layout.addWidget(self._sticky_buttons_checkbox, row, 0, 1, 2)
+        layout.addWidget(self._sticky_buttons_checkbox, row, 1, 1, 3)
 
         group.setLayout(layout)
         self._apply_groupbox_style(group)
