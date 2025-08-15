@@ -287,26 +287,6 @@ class ControllerButtonsWidget(QWidget):
         for button in self._buttons.values():
             button.reset_position()
         self._pressed_buttons.clear()
-    
-    def set_button_layout(self, layout_type="cross"):
-        """
-        Set the button layout arrangement.
-        
-        Args:
-            layout_type (str): Layout type - "cross" (default), "diamond", "square", etc.
-                              Future enhancement for different controller layouts
-        """
-        # For now, only cross layout is implemented
-        # This method is prepared for future layout variations
-        if layout_type == "cross":
-            # This is already implemented in _init_ui()
-            pass
-        # Future layouts can be added here:
-        # elif layout_type == "diamond":
-        #     # Arrange in diamond pattern
-        # elif layout_type == "square": 
-        #     # Arrange in 2x2 grid
-        pass
 
     def set_sticky_buttons(self, enabled: bool) -> None:
         enabled = bool(enabled)
