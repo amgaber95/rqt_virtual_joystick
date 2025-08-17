@@ -14,6 +14,7 @@ from python_qt_binding.QtWidgets import (
 
 from .joystick_widget import JoystickWidget
 from .controller_buttons_widget import ControllerButtonsWidget
+from .segmented_toggle import SegmentedToggle
 from .config_manager import (
     ConfigurationManager,
     RETURN_MODE_BOTH,
@@ -86,9 +87,9 @@ class JoystickMainWidget(QWidget):
         row = 0
         self._publish_label = QLabel("Publish:")
         layout.addWidget(self._publish_label, row, 0)
-        self._publish_checkbox = QCheckBox("")
-        self._publish_checkbox.setChecked(self._config_manager.is_publish_enabled())
-        layout.addWidget(self._publish_checkbox, row, 1)
+        self._publish_toggle = SegmentedToggle(false_label="Disabled", true_label="Enabled")
+        self._publish_toggle.setChecked(self._config_manager.is_publish_enabled())
+        layout.addWidget(self._publish_toggle, row, 1, 1, 2)
 
         row += 1
         layout.addWidget(QLabel("Topic:"), row, 0)
@@ -384,11 +385,10 @@ class JoystickMainWidget(QWidget):
         index = max(0, self._return_mode_combo.findData(return_mode))
         self._return_mode_combo.setCurrentIndex(index)
         self._return_mode_combo.blockSignals(False)
-        self._return_mode_label.setText(self._return_mode_combo.currentText())
 
-        self._publish_checkbox.blockSignals(True)
-        self._publish_checkbox.setChecked(publish_enabled)
-        self._publish_checkbox.blockSignals(False)
+        self._publish_toggle.blockSignals(True)
+        self._publish_toggle.setChecked(publish_enabled)
+        self._publish_toggle.blockSignals(False)
 
         self._sticky_buttons_checkbox.blockSignals(True)
         self._sticky_buttons_checkbox.setChecked(sticky_enabled)
@@ -417,9 +417,9 @@ class JoystickMainWidget(QWidget):
 
     @pyqtSlot(bool)
     def _on_publish_enabled_changed(self, enabled: bool):
-        self._publish_checkbox.blockSignals(True)
-        self._publish_checkbox.setChecked(enabled)
-        self._publish_checkbox.blockSignals(False)
+        self._publish_toggle.blockSignals(True)
+        self._publish_toggle.setChecked(enabled)
+        self._publish_toggle.blockSignals(False)
 
     @pyqtSlot(bool)
     def _on_sticky_buttons_toggled(self, enabled: bool):
@@ -446,4 +446,3 @@ class JoystickMainWidget(QWidget):
         self._return_mode_combo.blockSignals(True)
         self._return_mode_combo.setCurrentIndex(index)
         self._return_mode_combo.blockSignals(False)
-        self._return_mode_label.setText(self._return_mode_combo.currentText())
