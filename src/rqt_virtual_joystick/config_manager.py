@@ -25,6 +25,12 @@ class JoystickConfig:
     publish_enabled: bool = True
     sticky_buttons: bool = False
     return_mode: str = RETURN_MODE_BOTH
+    twist_topic: str = "/cmd_vel"
+    twist_publish_rate: float = 20.0
+    twist_publish_enabled: bool = False
+    twist_linear_scale: float = 0.5
+    twist_angular_scale: float = 1.0
+    twist_holonomic: bool = False
 
     def __post_init__(self):
         self.validate()
@@ -63,6 +69,19 @@ class JoystickConfig:
         if self.return_mode not in valid_modes:
             raise ValueError(f"Return mode must be one of {valid_modes}")
 
+        if not self.twist_topic or not self.twist_topic.strip():
+            raise ValueError("Twist topic name cannot be empty")
+
+        if not 1.0 <= self.twist_publish_rate <= 100.0:
+            raise ValueError("Twist publish rate must be between 1.0 and 100.0 Hz")
+
+        for value, label in [
+            (self.twist_linear_scale, "linear"),
+            (self.twist_angular_scale, "angular"),
+        ]:
+            if value < 0.0:
+                raise ValueError(f"Twist {label} scale must be non-negative")
+
 class ConfigurationManager(QObject):
     """Tracks configuration values and emits change notifications."""
 
@@ -74,6 +93,11 @@ class ConfigurationManager(QObject):
     publish_enabled_changed = pyqtSignal(bool)
     sticky_buttons_changed = pyqtSignal(bool)
     return_mode_changed = pyqtSignal(str)
+    twist_topic_changed = pyqtSignal(str)
+    twist_rate_changed = pyqtSignal(float)
+    twist_publish_enabled_changed = pyqtSignal(bool)
+    twist_scales_changed = pyqtSignal()
+    twist_holonomic_changed = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -209,6 +233,71 @@ class ConfigurationManager(QObject):
             self.return_mode_changed.emit(return_mode)
             self.config_changed.emit()
 
+    def get_twist_topic(self) -> str:
+        return self._config.twist_topic
+
+    def set_twist_topic(self, topic_name: str):
+        if not topic_name or not topic_name.strip():
+            raise ValueError("Twist topic name cannot be empty")
+
+        topic_name = topic_name.strip()
+        if topic_name != self._config.twist_topic:
+            self._config.twist_topic = topic_name
+            self.twist_topic_changed.emit(topic_name)
+            self.config_changed.emit()
+
+    def get_twist_publish_rate(self) -> float:
+        return self._config.twist_publish_rate
+
+    def set_twist_publish_rate(self, rate: float):
+        if not 1.0 <= rate <= 100.0:
+            raise ValueError("Twist publish rate must be between 1.0 and 100.0 Hz")
+
+        if rate != self._config.twist_publish_rate:
+            self._config.twist_publish_rate = rate
+            self.twist_rate_changed.emit(rate)
+            self.config_changed.emit()
+
+    def is_twist_publish_enabled(self) -> bool:
+        return self._config.twist_publish_enabled
+
+    def set_twist_publish_enabled(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled != self._config.twist_publish_enabled:
+            self._config.twist_publish_enabled = enabled
+            self.twist_publish_enabled_changed.emit(enabled)
+            self.config_changed.emit()
+
+    def get_twist_scales(self) -> tuple[float, float]:
+        return (
+            self._config.twist_linear_scale,
+            self._config.twist_angular_scale,
+        )
+
+    def set_twist_scales(self, linear: float, angular: float):
+        for value, label in [(linear, "linear"), (angular, "angular")]:
+            if value < 0.0:
+                raise ValueError(f"Twist {label} scale must be non-negative")
+
+        if (
+            linear != self._config.twist_linear_scale
+            or angular != self._config.twist_angular_scale
+        ):
+            self._config.twist_linear_scale = linear
+            self._config.twist_angular_scale = angular
+            self.twist_scales_changed.emit()
+            self.config_changed.emit()
+
+    def is_twist_holonomic_enabled(self) -> bool:
+        return self._config.twist_holonomic
+
+    def set_twist_holonomic(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled != self._config.twist_holonomic:
+            self._config.twist_holonomic = enabled
+            self.twist_holonomic_changed.emit(enabled)
+            self.config_changed.emit()
+
     def save_settings(self, settings) -> None:
         settings.set_value('topic_name', self._config.topic_name)
         settings.set_value('publish_rate', self._config.publish_rate)
@@ -220,6 +309,12 @@ class ConfigurationManager(QObject):
         settings.set_value('publish_enabled', self._config.publish_enabled)
         settings.set_value('return_mode', self._config.return_mode)
         settings.set_value('sticky_buttons', self._config.sticky_buttons)
+        settings.set_value('twist_topic', self._config.twist_topic)
+        settings.set_value('twist_publish_rate', self._config.twist_publish_rate)
+        settings.set_value('twist_publish_enabled', self._config.twist_publish_enabled)
+        settings.set_value('twist_linear_scale', self._config.twist_linear_scale)
+        settings.set_value('twist_angular_scale', self._config.twist_angular_scale)
+        settings.set_value('twist_holonomic', self._config.twist_holonomic)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -297,3 +392,39 @@ class ConfigurationManager(QObject):
         else:
             sticky_enabled = bool(sticky_value)
         self.set_sticky_buttons(sticky_enabled)
+
+        try:
+            self.set_twist_topic(settings.value('twist_topic', '/cmd_vel'))
+        except ValueError:
+            self.set_twist_topic('/cmd_vel')
+
+        twist_rate = safe_convert(settings.value('twist_publish_rate'), float, 20.0)
+        try:
+            self.set_twist_publish_rate(twist_rate)
+        except ValueError:
+            self.set_twist_publish_rate(20.0)
+
+        twist_enabled_value = settings.value('twist_publish_enabled')
+        if isinstance(twist_enabled_value, str):
+            twist_enabled = twist_enabled_value.lower() in ('1', 'true', 'yes', 'on')
+        elif twist_enabled_value is None:
+            twist_enabled = False
+        else:
+            twist_enabled = bool(twist_enabled_value)
+        self.set_twist_publish_enabled(twist_enabled)
+
+        linear_scale = safe_convert(settings.value('twist_linear_scale'), float, 0.5)
+        angular_scale = safe_convert(settings.value('twist_angular_scale'), float, 1.0)
+        try:
+            self.set_twist_scales(linear_scale, angular_scale)
+        except ValueError:
+            self.set_twist_scales(0.5, 1.0)
+
+        holonomic_value = settings.value('twist_holonomic')
+        if isinstance(holonomic_value, str):
+            holonomic_enabled = holonomic_value.lower() in ('1', 'true', 'yes', 'on')
+        elif holonomic_value is None:
+            holonomic_enabled = False
+        else:
+            holonomic_enabled = bool(holonomic_value)
+        self.set_twist_holonomic(holonomic_enabled)
