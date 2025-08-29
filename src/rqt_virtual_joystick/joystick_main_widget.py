@@ -10,6 +10,7 @@ from python_qt_binding.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QSizePolicy,
+    QDoubleSpinBox,
 )
 
 from .joystick_widget import JoystickWidget
@@ -23,6 +24,7 @@ from .config_manager import (
     RETURN_MODE_VERTICAL,
 )
 from .joy_publisher import JoyPublisherService
+from .twist_publisher import TwistPublisherService
 
 
 class JoystickMainWidget(QWidget):
@@ -34,7 +36,14 @@ class JoystickMainWidget(QWidget):
         self._ros_node = ros_node
         self._config_manager = ConfigurationManager()
         self._publisher_service = JoyPublisherService(ros_node, self._config_manager)
+        self._twist_publisher_service = TwistPublisherService(ros_node, self._config_manager)
         self._committed_topic_name = self._config_manager.get_topic_name()
+        self._committed_twist_topic_name = self._config_manager.get_twist_topic()
+
+        self._label_min_width = 90
+        self._value_placeholder_width = 60
+
+        self._twist_publisher_service.update_from_axes(0.0, 0.0)
 
         self.setMaximumWidth(700)  # Increased to accommodate joystick + buttons
 
@@ -72,8 +81,8 @@ class JoystickMainWidget(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(8)
         layout.addWidget(self._create_publishing_group())
+        layout.addWidget(self._create_twist_group())
         layout.addWidget(self._create_joystick_group())
-        layout.addWidget(self._create_buttons_group())
         layout.addStretch(1)
         controls_widget.setLayout(layout)
         controls_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -107,8 +116,90 @@ class JoystickMainWidget(QWidget):
         layout.addWidget(self._rate_slider, row, 1, 1, 2)
 
         self._rate_label = QLabel(f"{int(self._config_manager.get_publish_rate())} Hz")
-        self._rate_label.setMinimumWidth(40)
-        layout.addWidget(self._rate_label, row, 3)
+        self._rate_label.setFixedWidth(self._value_placeholder_width)
+        self._rate_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        layout.addWidget(self._rate_label, row, 2)
+
+        group.setLayout(layout)
+        self._apply_groupbox_style(group)
+        return group
+
+    def _create_twist_group(self) -> QGroupBox:
+        group = QGroupBox("Twist Output")
+        layout = QGridLayout()
+        layout.setVerticalSpacing(8)
+        layout.setColumnStretch(0, 0)
+        layout.setColumnStretch(1, 1)
+        layout.setColumnStretch(2, 0)
+
+        row = 0
+        twist_publish_label = QLabel("Publish:")
+        twist_publish_label.setMinimumWidth(self._label_min_width)
+        layout.addWidget(twist_publish_label, row, 0)
+        self._twist_publish_toggle = SegmentedToggle(false_label="Disabled", true_label="Enabled")
+        self._twist_publish_toggle.setChecked(self._config_manager.is_twist_publish_enabled())
+        layout.addWidget(self._twist_publish_toggle, row, 1)
+        layout.addWidget(self._build_placeholder(), row, 2)
+
+        row += 1
+        twist_topic_label = QLabel("Topic:")
+        twist_topic_label.setMinimumWidth(self._label_min_width)
+        layout.addWidget(twist_topic_label, row, 0)
+        self._twist_topic_combo = QComboBox()
+        self._twist_topic_combo.setEditable(True)
+        self._twist_topic_combo.addItems(["/cmd_vel", "cmd_vel", "robot/cmd_vel"])
+        self._twist_topic_combo.setCurrentText(self._config_manager.get_twist_topic())
+        self._twist_topic_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(self._twist_topic_combo, row, 1)
+        layout.addWidget(self._build_placeholder(), row, 2)
+
+        row += 1
+        twist_rate_label = QLabel("Rate:")
+        twist_rate_label.setMinimumWidth(self._label_min_width)
+        layout.addWidget(twist_rate_label, row, 0)
+        self._twist_rate_slider = QSlider(Qt.Horizontal)
+        self._twist_rate_slider.setRange(1, 100)
+        self._twist_rate_slider.setValue(int(self._config_manager.get_twist_publish_rate()))
+        self._twist_rate_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(self._twist_rate_slider, row, 1)
+
+        self._twist_rate_label = QLabel(f"{int(self._config_manager.get_twist_publish_rate())} Hz")
+        self._twist_rate_label.setFixedWidth(self._value_placeholder_width)
+        self._twist_rate_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        layout.addWidget(self._twist_rate_label, row, 2)
+
+        row += 1
+        linear_label = QLabel("Linear Scale:")
+        linear_label.setMinimumWidth(self._label_min_width)
+        layout.addWidget(linear_label, row, 0)
+        self._twist_linear_spin = QDoubleSpinBox()
+        self._twist_linear_spin.setDecimals(2)
+        self._twist_linear_spin.setSingleStep(0.1)
+        self._twist_linear_spin.setRange(0.0, 5.0)
+        self._twist_linear_spin.setValue(self._config_manager.get_twist_scales()[0])
+        layout.addWidget(self._twist_linear_spin, row, 1)
+        layout.addWidget(self._build_placeholder(), row, 2)
+
+        row += 1
+        angular_label = QLabel("Angular Scale:")
+        angular_label.setMinimumWidth(self._label_min_width)
+        layout.addWidget(angular_label, row, 0)
+        self._twist_angular_spin = QDoubleSpinBox()
+        self._twist_angular_spin.setDecimals(2)
+        self._twist_angular_spin.setSingleStep(0.1)
+        self._twist_angular_spin.setRange(0.0, 5.0)
+        self._twist_angular_spin.setValue(self._config_manager.get_twist_scales()[1])
+        layout.addWidget(self._twist_angular_spin, row, 1)
+        layout.addWidget(self._build_placeholder(), row, 2)
+
+        row += 1
+        holonomic_label = QLabel("Holonomic:")
+        holonomic_label.setMinimumWidth(self._label_min_width)
+        layout.addWidget(holonomic_label, row, 0)
+        self._twist_holonomic_checkbox = QCheckBox()
+        self._twist_holonomic_checkbox.setChecked(self._config_manager.is_twist_holonomic_enabled())
+        layout.addWidget(self._twist_holonomic_checkbox, row, 1)
+        layout.addWidget(self._build_placeholder(), row, 2)
 
         group.setLayout(layout)
         self._apply_groupbox_style(group)
@@ -245,16 +336,33 @@ class JoystickMainWidget(QWidget):
         self._publish_checkbox.toggled.connect(self._on_publish_toggled)
         self._return_mode_combo.currentIndexChanged.connect(self._on_return_mode_changed)
         self._sticky_buttons_checkbox.toggled.connect(self._on_sticky_buttons_toggled)
+        self._twist_publish_toggle.toggled.connect(self._on_twist_publish_toggled)
+
+        self._twist_topic_combo.activated[str].connect(self._on_twist_topic_activated)
+        twist_topic_line_edit = self._twist_topic_combo.lineEdit()
+        if twist_topic_line_edit:
+            twist_topic_line_edit.returnPressed.connect(self._on_twist_topic_return_pressed)
+
+        self._twist_rate_slider.valueChanged.connect(self._on_twist_rate_changed)
+        self._twist_linear_spin.valueChanged.connect(self._on_twist_scale_changed)
+        self._twist_angular_spin.valueChanged.connect(self._on_twist_scale_changed)
+        self._twist_holonomic_checkbox.toggled.connect(self._on_twist_holonomic_toggled)
 
         self._config_manager.dead_zone_changed.connect(self._update_control_values)
         self._config_manager.expo_changed.connect(self._update_control_values)
         self._config_manager.publish_enabled_changed.connect(self._on_publish_enabled_changed)
         self._config_manager.return_mode_changed.connect(self._on_return_mode_updated)
         self._config_manager.sticky_buttons_changed.connect(self._on_sticky_buttons_changed)
+        self._config_manager.twist_publish_enabled_changed.connect(self._on_twist_publish_enabled_changed)
+        self._config_manager.twist_topic_changed.connect(self._on_twist_topic_changed)
+        self._config_manager.twist_rate_changed.connect(self._on_twist_rate_updated)
+        self._config_manager.twist_scales_changed.connect(self._on_twist_scales_updated)
+        self._config_manager.twist_holonomic_changed.connect(self._on_twist_holonomic_changed)
 
         self._joystick_widget.position_changed.connect(self._on_joystick_moved)
         self._controller_buttons_widget.button_pressed.connect(self._on_button_pressed)
         self._publisher_service.publisher_error.connect(self._on_publisher_error)
+        self._twist_publisher_service.publisher_error.connect(self._on_publisher_error)
 
     @pyqtSlot(str)
     def _on_topic_activated(self, topic_name: str) -> None:
@@ -312,6 +420,7 @@ class JoystickMainWidget(QWidget):
     @pyqtSlot(float, float)
     def _on_joystick_moved(self, x: float, y: float):
         self._publisher_service.update_axes(x, y)
+        self._twist_publisher_service.update_from_axes(x, y)
 
     @pyqtSlot(int, bool)
     def _on_button_pressed(self, button_index: int, pressed: bool):
@@ -337,11 +446,20 @@ class JoystickMainWidget(QWidget):
         publish_rate = int(self._config_manager.get_publish_rate())
         self._rate_slider.setValue(publish_rate)
         self._rate_label.setText(f"{publish_rate} Hz")
+
+        twist_topic = self._config_manager.get_twist_topic()
+        self._committed_twist_topic_name = twist_topic
+        self._twist_topic_combo.setCurrentText(twist_topic)
+
+        twist_rate = int(self._config_manager.get_twist_publish_rate())
+        self._twist_rate_slider.setValue(twist_rate)
+        self._twist_rate_label.setText(f"{twist_rate} Hz")
         
         self._update_control_values()
 
     def shutdown(self):
         self._publisher_service.shutdown()
+        self._twist_publisher_service.shutdown()
         self._joystick_widget.reset_position()
         self._controller_buttons_widget.reset_buttons()
 
@@ -390,6 +508,35 @@ class JoystickMainWidget(QWidget):
         self._publish_toggle.setChecked(publish_enabled)
         self._publish_toggle.blockSignals(False)
 
+        twist_enabled = self._config_manager.is_twist_publish_enabled()
+        self._twist_publish_toggle.blockSignals(True)
+        self._twist_publish_toggle.setChecked(twist_enabled)
+        self._twist_publish_toggle.blockSignals(False)
+
+        twist_topic = self._config_manager.get_twist_topic()
+        self._twist_topic_combo.blockSignals(True)
+        self._twist_topic_combo.setCurrentText(twist_topic)
+        self._twist_topic_combo.blockSignals(False)
+
+        twist_rate = int(self._config_manager.get_twist_publish_rate())
+        self._twist_rate_slider.blockSignals(True)
+        self._twist_rate_slider.setValue(twist_rate)
+        self._twist_rate_slider.blockSignals(False)
+        self._twist_rate_label.setText(f"{twist_rate} Hz")
+
+        linear_scale, angular_scale = self._config_manager.get_twist_scales()
+        self._twist_linear_spin.blockSignals(True)
+        self._twist_linear_spin.setValue(linear_scale)
+        self._twist_linear_spin.blockSignals(False)
+        self._twist_angular_spin.blockSignals(True)
+        self._twist_angular_spin.setValue(angular_scale)
+        self._twist_angular_spin.blockSignals(False)
+
+        holonomic_enabled = self._config_manager.is_twist_holonomic_enabled()
+        self._twist_holonomic_checkbox.blockSignals(True)
+        self._twist_holonomic_checkbox.setChecked(holonomic_enabled)
+        self._twist_holonomic_checkbox.blockSignals(False)
+
         self._sticky_buttons_checkbox.blockSignals(True)
         self._sticky_buttons_checkbox.setChecked(sticky_enabled)
         self._sticky_buttons_checkbox.blockSignals(False)
@@ -422,6 +569,10 @@ class JoystickMainWidget(QWidget):
         self._publish_toggle.blockSignals(False)
 
     @pyqtSlot(bool)
+    def _on_twist_publish_toggled(self, enabled: bool):
+        self._config_manager.set_twist_publish_enabled(enabled)
+
+    @pyqtSlot(bool)
     def _on_sticky_buttons_toggled(self, enabled: bool):
         self._config_manager.set_sticky_buttons(enabled)
 
@@ -446,3 +597,78 @@ class JoystickMainWidget(QWidget):
         self._return_mode_combo.blockSignals(True)
         self._return_mode_combo.setCurrentIndex(index)
         self._return_mode_combo.blockSignals(False)
+
+    def _commit_twist_topic(self, topic_name: str) -> None:
+        try:
+            self._config_manager.set_twist_topic(topic_name)
+            self._committed_twist_topic_name = topic_name
+        except ValueError:
+            self._twist_topic_combo.blockSignals(True)
+            self._twist_topic_combo.setCurrentText(self._committed_twist_topic_name)
+            self._twist_topic_combo.blockSignals(False)
+
+    @pyqtSlot(str)
+    def _on_twist_topic_activated(self, topic_name: str) -> None:
+        self._commit_twist_topic(topic_name)
+
+    @pyqtSlot()
+    def _on_twist_topic_return_pressed(self) -> None:
+        self._commit_twist_topic(self._twist_topic_combo.currentText())
+
+    @pyqtSlot(int)
+    def _on_twist_rate_changed(self, value: int):
+        try:
+            self._config_manager.set_twist_publish_rate(float(value))
+            self._twist_rate_label.setText(f"{value} Hz")
+        except ValueError:
+            pass
+
+    @pyqtSlot(float)
+    def _on_twist_rate_updated(self, value: float):
+        self._twist_rate_slider.blockSignals(True)
+        self._twist_rate_slider.setValue(int(value))
+        self._twist_rate_slider.blockSignals(False)
+        self._twist_rate_label.setText(f"{int(value)} Hz")
+
+    @pyqtSlot(float)
+    def _on_twist_scale_changed(self, _value: float):
+        try:
+            self._config_manager.set_twist_scales(
+                self._twist_linear_spin.value(),
+                self._twist_angular_spin.value(),
+            )
+        except ValueError:
+            pass
+
+    @pyqtSlot()
+    def _on_twist_scales_updated(self):
+        linear_scale, angular_scale = self._config_manager.get_twist_scales()
+        self._twist_linear_spin.blockSignals(True)
+        self._twist_linear_spin.setValue(linear_scale)
+        self._twist_linear_spin.blockSignals(False)
+        self._twist_angular_spin.blockSignals(True)
+        self._twist_angular_spin.setValue(angular_scale)
+        self._twist_angular_spin.blockSignals(False)
+
+    @pyqtSlot(bool)
+    def _on_twist_publish_enabled_changed(self, enabled: bool):
+        self._twist_publish_toggle.blockSignals(True)
+        self._twist_publish_toggle.setChecked(enabled)
+        self._twist_publish_toggle.blockSignals(False)
+
+    @pyqtSlot(bool)
+    def _on_twist_holonomic_toggled(self, enabled: bool):
+        self._config_manager.set_twist_holonomic(enabled)
+
+    @pyqtSlot(bool)
+    def _on_twist_holonomic_changed(self, enabled: bool):
+        self._twist_holonomic_checkbox.blockSignals(True)
+        self._twist_holonomic_checkbox.setChecked(enabled)
+        self._twist_holonomic_checkbox.blockSignals(False)
+
+    @pyqtSlot(str)
+    def _on_twist_topic_changed(self, topic_name: str):
+        self._committed_twist_topic_name = topic_name
+        self._twist_topic_combo.blockSignals(True)
+        self._twist_topic_combo.setCurrentText(topic_name)
+        self._twist_topic_combo.blockSignals(False)
