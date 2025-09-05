@@ -275,10 +275,15 @@ class JoystickMainWidget(QWidget):
         holonomic_label = QLabel("Holonomic:")
         holonomic_label.setMinimumWidth(self._label_min_width)
         layout.addWidget(holonomic_label, row, 0)
+
+        self._twist_holonomic_hint = QLabel("Hold Shift to temporarily enable")
+        self._twist_holonomic_hint.setStyleSheet("color: #a0a0a0; font-size: 11px;")
+        self._twist_holonomic_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        layout.addWidget(self._twist_holonomic_hint, row, 1)
+        
         self._twist_holonomic_checkbox = QCheckBox()
         self._twist_holonomic_checkbox.setChecked(self._config_manager.is_twist_holonomic_enabled())
         layout.addWidget(self._twist_holonomic_checkbox, row, 1)
-        layout.addWidget(self._build_placeholder(), row, 2)
 
         group.setLayout(layout)
         self._apply_groupbox_style(group)
