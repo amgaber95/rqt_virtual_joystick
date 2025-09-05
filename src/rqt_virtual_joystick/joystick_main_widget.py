@@ -1,4 +1,4 @@
-from python_qt_binding.QtCore import Qt, pyqtSlot
+from python_qt_binding.QtCore import Qt, pyqtSlot, QEvent, QObject
 from python_qt_binding.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -11,6 +11,7 @@ from python_qt_binding.QtWidgets import (
     QGridLayout,
     QSizePolicy,
     QDoubleSpinBox,
+    QApplication,
 )
 
 from .joystick_widget import JoystickWidget
@@ -25,6 +26,70 @@ from .config_manager import (
 )
 from .joy_publisher import JoyPublisherService
 from .twist_publisher import TwistPublisherService
+
+
+class HolonomicKeyHandler(QObject):
+    """Temporary holonomic override driven by Shift key state."""
+
+    def __init__(self, root_widget: QWidget, config_manager: ConfigurationManager):
+        super().__init__(root_widget)
+        self._root_widget = root_widget
+        self._config_manager = config_manager
+        self._shift_active = False
+        self._restore_state = self._config_manager.is_twist_holonomic_enabled()
+
+        app = QApplication.instance()
+        self._application = app
+        if self._application is not None:
+            self._application.installEventFilter(self)
+
+        self._root_widget.destroyed.connect(self._uninstall)
+        self._config_manager.twist_holonomic_changed.connect(self._on_holonomic_changed)
+
+    def eventFilter(self, obj, event):
+        if not self._is_relevant_object(obj):
+            return False
+
+        if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
+            if event.key() == Qt.Key_Shift:
+                self._activate_shift_override()
+        elif event.type() == QEvent.KeyRelease and not event.isAutoRepeat():
+            if event.key() == Qt.Key_Shift:
+                self._deactivate_shift_override()
+
+        return False
+
+    def _is_relevant_object(self, obj) -> bool:
+        if not isinstance(obj, QWidget):
+            return False
+        return obj is self._root_widget or self._root_widget.isAncestorOf(obj)
+
+    def _activate_shift_override(self) -> None:
+        if self._shift_active:
+            return
+
+        self._shift_active = True
+        self._restore_state = self._config_manager.is_twist_holonomic_enabled()
+        if not self._restore_state:
+            self._config_manager.set_twist_holonomic(True)
+
+    def _deactivate_shift_override(self) -> None:
+        if not self._shift_active:
+            return
+
+        self._shift_active = False
+        desired_state = self._restore_state
+        if self._config_manager.is_twist_holonomic_enabled() != desired_state:
+            self._config_manager.set_twist_holonomic(desired_state)
+
+    def _on_holonomic_changed(self, enabled: bool) -> None:
+        if not self._shift_active:
+            self._restore_state = enabled
+
+    def _uninstall(self) -> None:
+        if self._application is not None:
+            self._application.removeEventFilter(self)
+            self._application = None
 
 
 class JoystickMainWidget(QWidget):
@@ -49,6 +114,8 @@ class JoystickMainWidget(QWidget):
 
         self._init_ui()
         self._connect_signals()
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._holonomic_key_handler = HolonomicKeyHandler(self, self._config_manager)
 
     def _init_ui(self):
         main_layout = QVBoxLayout()
