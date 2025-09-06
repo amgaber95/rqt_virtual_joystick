@@ -307,7 +307,7 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self._dead_zone_slider, row, 1)
 
-        self._dead_zone_label = QLabel(f"{int(self._config_manager.get_dead_zone() * 100)}%")
+        self._dead_zone_label = QLabel(f"{int(self._config_manager.get_dead_zone() * 100)} %")
         self._dead_zone_label.setFixedWidth(self._value_placeholder_width)
         self._dead_zone_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self._dead_zone_label, row, 2)
@@ -322,7 +322,7 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_x_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self._dead_zone_x_slider, row, 1)
 
-        self._dead_zone_x_label = QLabel(f"{int(self._config_manager.get_dead_zone_x() * 100)}%")
+        self._dead_zone_x_label = QLabel(f"{int(self._config_manager.get_dead_zone_x() * 100)} %")
         self._dead_zone_x_label.setFixedWidth(self._value_placeholder_width)
         self._dead_zone_x_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self._dead_zone_x_label, row, 2)
@@ -337,7 +337,7 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_y_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self._dead_zone_y_slider, row, 1)
 
-        self._dead_zone_y_label = QLabel(f"{int(self._config_manager.get_dead_zone_y() * 100)}%")
+        self._dead_zone_y_label = QLabel(f"{int(self._config_manager.get_dead_zone_y() * 100)} %")
         self._dead_zone_y_label.setFixedWidth(self._value_placeholder_width)
         self._dead_zone_y_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self._dead_zone_y_label, row, 2)
@@ -352,7 +352,7 @@ class JoystickMainWidget(QWidget):
         self._expo_x_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self._expo_x_slider, row, 1)
 
-        self._expo_x_label = QLabel(f"{int(self._config_manager.get_expo_x())}%")
+        self._expo_x_label = QLabel(f"{int(self._config_manager.get_expo_x())} %")
         self._expo_x_label.setFixedWidth(self._value_placeholder_width)
         self._expo_x_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self._expo_x_label, row, 2)
@@ -499,7 +499,7 @@ class JoystickMainWidget(QWidget):
         try:
             dead_zone_value = value / 100.0  # Convert percentage to 0.0-0.9 range
             self._config_manager.set_dead_zone(dead_zone_value)
-            self._dead_zone_label.setText(f"{value}%")
+            self._dead_zone_label.setText(f"{value} %")
         except ValueError:
             pass
 
@@ -508,7 +508,7 @@ class JoystickMainWidget(QWidget):
         try:
             dead_zone_value = value / 100.0
             self._config_manager.set_dead_zone_x(dead_zone_value)
-            self._dead_zone_x_label.setText(f"{value}%")
+            self._dead_zone_x_label.setText(f"{value} %")
         except ValueError:
             pass
 
@@ -517,7 +517,7 @@ class JoystickMainWidget(QWidget):
         try:
             dead_zone_value = value / 100.0
             self._config_manager.set_dead_zone_y(dead_zone_value)
-            self._dead_zone_y_label.setText(f"{value}%")
+            self._dead_zone_y_label.setText(f"{value} %")
         except ValueError:
             pass
 
@@ -581,27 +581,27 @@ class JoystickMainWidget(QWidget):
         self._dead_zone_slider.blockSignals(True)
         self._dead_zone_slider.setValue(dead_zone_value)
         self._dead_zone_slider.blockSignals(False)
-        self._dead_zone_label.setText(f"{dead_zone_value}%")
+        self._dead_zone_label.setText(f"{dead_zone_value} %")
 
         self._dead_zone_x_slider.blockSignals(True)
         self._dead_zone_x_slider.setValue(dead_zone_x_value)
         self._dead_zone_x_slider.blockSignals(False)
-        self._dead_zone_x_label.setText(f"{dead_zone_x_value}%")
+        self._dead_zone_x_label.setText(f"{dead_zone_x_value} %")
 
         self._dead_zone_y_slider.blockSignals(True)
         self._dead_zone_y_slider.setValue(dead_zone_y_value)
         self._dead_zone_y_slider.blockSignals(False)
-        self._dead_zone_y_label.setText(f"{dead_zone_y_value}%")
+        self._dead_zone_y_label.setText(f"{dead_zone_y_value} %")
 
         self._expo_x_slider.blockSignals(True)
         self._expo_x_slider.setValue(expo_x_value)
         self._expo_x_slider.blockSignals(False)
-        self._expo_x_label.setText(f"{expo_x_value}%")
+        self._expo_x_label.setText(f"{expo_x_value} %")
 
         self._expo_y_slider.blockSignals(True)
         self._expo_y_slider.setValue(expo_y_value)
         self._expo_y_slider.blockSignals(False)
-        self._expo_y_label.setText(f"{expo_y_value}%")
+        self._expo_y_label.setText(f"{expo_y_value} %")
 
         self._return_mode_combo.blockSignals(True)
         index = max(0, self._return_mode_combo.findData(return_mode))
@@ -650,7 +650,7 @@ class JoystickMainWidget(QWidget):
     def _on_expo_x_changed(self, value: int):
         try:
             self._config_manager.set_expo_x(float(value))
-            self._expo_x_label.setText(f"{value}%")
+            self._expo_x_label.setText(f"{value} %")
         except ValueError:
             pass
 
@@ -658,7 +658,7 @@ class JoystickMainWidget(QWidget):
     def _on_expo_y_changed(self, value: int):
         try:
             self._config_manager.set_expo_y(float(value))
-            self._expo_y_label.setText(f"{value}%")
+            self._expo_y_label.setText(f"{value} %")
         except ValueError:
             pass
 
