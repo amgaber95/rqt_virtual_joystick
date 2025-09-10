@@ -69,40 +69,55 @@ class JoyPublisherService(QObject):
         self._config_manager.rate_changed.connect(self._on_rate_changed)
         self._config_manager.publish_enabled_changed.connect(self._on_enabled_changed)
         
+    def _dispose_publisher(self, publisher: Optional[rclpy.publisher.Publisher]) -> None:
+        """Destroy a ROS publisher while swallowing cleanup errors."""
+        if publisher is None:
+            return
+
+        try:
+            self._node.destroy_publisher(publisher)
+        except Exception as exc:
+            self._node.get_logger().warn(
+                f"Failed to destroy Joy publisher instance: {exc}"
+            )
+
     def _create_publisher(self) -> bool:
         """
         Create or recreate the ROS publisher.
-        
+
         Returns:
             True if publisher was created successfully, False otherwise
         """
+        # Get current topic name
+        topic_name = self._config_manager.get_topic_name()
+
+        # Create QoS profile for reliable delivery
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+
         try:
-            # Get current topic name
-            topic_name = self._config_manager.get_topic_name()
-            
-            # Create QoS profile for reliable delivery
-            qos_profile = QoSProfile(
-                reliability=QoSReliabilityPolicy.RELIABLE,
-                history=QoSHistoryPolicy.KEEP_LAST,
-                depth=1
-            )
-            
-            # Create publisher
-            self._publisher = self._node.create_publisher(
-                Joy, 
-                topic_name, 
+            new_publisher = self._node.create_publisher(
+                Joy,
+                topic_name,
                 qos_profile
             )
-            
-            self._node.get_logger().info(f"Created Joy publisher for topic: {topic_name}")
-            return True
-            
-        except Exception as e:
-            error_msg = f"Failed to create publisher for topic '{topic_name}': {str(e)}"
+        except Exception as exc:
+            error_msg = f"Failed to create publisher for topic '{topic_name}': {exc}"
             self._node.get_logger().error(error_msg)
             self.publisher_error.emit(error_msg)
-            self._publisher = None
             return False
+
+        old_publisher = self._publisher
+        self._publisher = new_publisher
+        self._node.get_logger().info(f"Created Joy publisher for topic: {topic_name}")
+
+        if old_publisher is not None and old_publisher is not new_publisher:
+            self._dispose_publisher(old_publisher)
+
+        return True
             
     def _update_timer_rate(self):
         """Update the publishing timer rate based on configuration."""
@@ -240,8 +255,10 @@ class JoyPublisherService(QObject):
         # Stop timer
         if self._publish_timer.isActive():
             self._publish_timer.stop()
-            
-        # Clean up publisher (ROS node handles destruction)
-        self._publisher = None
-        
+
+        # Clean up publisher
+        if self._publisher is not None:
+            self._dispose_publisher(self._publisher)
+            self._publisher = None
+
         self._node.get_logger().info("Joy publisher service shut down")

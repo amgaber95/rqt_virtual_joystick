@@ -39,23 +39,42 @@ class TwistPublisherService(QObject):
         self._config_manager.twist_scales_changed.connect(self._on_scales_changed)
         self._config_manager.twist_holonomic_changed.connect(self._on_holonomic_changed)
 
+    def _dispose_publisher(self, publisher: Optional[rclpy.publisher.Publisher]) -> None:
+        """Destroy a ROS publisher, ignoring cleanup errors to avoid crashes."""
+        if publisher is None:
+            return
+
+        try:
+            self._node.destroy_publisher(publisher)
+        except Exception as exc:
+            self._node.get_logger().warn(
+                f"Failed to destroy Twist publisher instance: {exc}"
+            )
+
     def _create_publisher(self) -> bool:
         topic_name = self._config_manager.get_twist_topic()
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
         try:
-            qos_profile = QoSProfile(
-                reliability=QoSReliabilityPolicy.RELIABLE,
-                history=QoSHistoryPolicy.KEEP_LAST,
-                depth=1,
-            )
-            self._publisher = self._node.create_publisher(Twist, topic_name, qos_profile)
-            self._node.get_logger().info(f"Created Twist publisher for topic: {topic_name}")
-            return True
-        except Exception as exc:  # pylint: disable=broad-except
+            new_publisher = self._node.create_publisher(Twist, topic_name, qos_profile)
+        except Exception as exc:
             error_msg = f"Failed to create Twist publisher for topic '{topic_name}': {exc}"
             self._node.get_logger().error(error_msg)
             self.publisher_error.emit(error_msg)
-            self._publisher = None
             return False
+
+        old_publisher = self._publisher
+        self._publisher = new_publisher
+        self._node.get_logger().info(f"Created Twist publisher for topic: {topic_name}")
+
+        if old_publisher is not None and old_publisher is not new_publisher:
+            self._dispose_publisher(old_publisher)
+
+        return True
 
     def _update_timer_rate(self) -> None:
         rate_hz = self._config_manager.get_twist_publish_rate()
@@ -105,7 +124,7 @@ class TwistPublisherService(QObject):
                 self._current_twist.angular.y = 0.0
             self._publisher.publish(self._current_twist)
             self.message_published.emit()
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception as exc:
             error_msg = f"Failed to publish Twist message: {exc}"
             self._node.get_logger().error(error_msg)
             self.publisher_error.emit(error_msg)
@@ -139,8 +158,5 @@ class TwistPublisherService(QObject):
     def shutdown(self) -> None:
         self.stop()
         if self._publisher is not None:
-            try:
-                self._node.destroy_publisher(self._publisher)
-            except Exception as exc:  # pylint: disable=broad-except
-                self._node.get_logger().warn(f"Failed to destroy Twist publisher: {exc}")
+            self._dispose_publisher(self._publisher)
             self._publisher = None
