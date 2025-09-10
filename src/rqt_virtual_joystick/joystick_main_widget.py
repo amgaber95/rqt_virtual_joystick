@@ -1,3 +1,7 @@
+from weakref import ref
+
+import sip
+
 from python_qt_binding.QtCore import Qt, pyqtSlot, QEvent, QObject
 from python_qt_binding.QtWidgets import (
     QWidget,
@@ -33,21 +37,31 @@ class HolonomicKeyHandler(QObject):
 
     def __init__(self, root_widget: QWidget, config_manager: ConfigurationManager):
         super().__init__(root_widget)
-        self._root_widget = root_widget
+        self._root_widget_ref = ref(root_widget)
         self._config_manager = config_manager
         self._shift_active = False
         self._restore_state = self._config_manager.is_twist_holonomic_enabled()
 
         app = QApplication.instance()
         self._application = app
+        self._installed_filter = False
         if self._application is not None:
             self._application.installEventFilter(self)
+            self._installed_filter = True
 
-        self._root_widget.destroyed.connect(self._uninstall)
+        root_widget.destroyed.connect(self._on_root_destroyed)
         self._config_manager.twist_holonomic_changed.connect(self._on_holonomic_changed)
 
     def eventFilter(self, obj, event):
-        if not self._is_relevant_object(obj):
+        root_widget = self._root_widget()
+        if self._is_deleted(root_widget):
+            self._uninstall()
+            return False
+
+        if self._is_deleted(obj):
+            return False
+
+        if not self._is_relevant_object(root_widget, obj):
             return False
 
         if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
@@ -59,10 +73,27 @@ class HolonomicKeyHandler(QObject):
 
         return False
 
-    def _is_relevant_object(self, obj) -> bool:
-        if not isinstance(obj, QWidget):
+    def _is_relevant_object(self, root_widget: QWidget, obj) -> bool:
+        if self._is_deleted(root_widget):
             return False
-        return obj is self._root_widget or self._root_widget.isAncestorOf(obj)
+
+        if not isinstance(obj, QWidget) or self._is_deleted(obj):
+            return False
+        try:
+            return obj is root_widget or root_widget.isAncestorOf(obj)
+        except RuntimeError:
+            return False
+
+    @staticmethod
+    def _is_deleted(qobj) -> bool:
+        if qobj is None:
+            return True
+        try:
+            return sip.isdeleted(qobj)
+        except (RuntimeError, ReferenceError):
+            return True
+        except TypeError:
+            return False
 
     def _activate_shift_override(self) -> None:
         if self._shift_active:
@@ -87,9 +118,21 @@ class HolonomicKeyHandler(QObject):
             self._restore_state = enabled
 
     def _uninstall(self) -> None:
-        if self._application is not None:
+        if self._installed_filter and self._application is not None:
             self._application.removeEventFilter(self)
-            self._application = None
+            self._installed_filter = False
+        self._application = None
+        self._root_widget_ref = None
+        try:
+            self._config_manager.twist_holonomic_changed.disconnect(self._on_holonomic_changed)
+        except TypeError:
+            pass
+
+    def _on_root_destroyed(self, _obj=None):
+        self._uninstall()
+
+    def _root_widget(self):
+        return self._root_widget_ref() if self._root_widget_ref is not None else None
 
 
 class JoystickMainWidget(QWidget):
