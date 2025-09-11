@@ -92,7 +92,8 @@ class TwistPublisherService(QObject):
         linear_scale, angular_scale = self._config_manager.get_twist_scales()
         holonomic = self._config_manager.is_twist_holonomic_enabled()
 
-        self._current_twist.linear.x = y * linear_scale
+        linear_x = y * linear_scale
+        self._current_twist.linear.x = linear_x
         self._current_twist.linear.y = -x * linear_scale if holonomic else 0.0
         self._current_twist.linear.z = 0.0
 
@@ -101,6 +102,10 @@ class TwistPublisherService(QObject):
 
         # Positive joystick X (right) should result in negative rotation.
         angular_command = -x * angular_scale
+
+        # When driving backward, flip turn direction so stick right always means "move right".
+        if linear_x < 0.0 and not holonomic:
+            angular_command *= -1.0
 
         self._current_twist.angular.z = 0.0 if holonomic else angular_command
 
