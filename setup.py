@@ -14,10 +14,11 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
+    author='Abdelrahman Mahmoud',
     maintainer='Abdelrahman Mahmoud',
     maintainer_email='abdulrahman.mahmoud1995@gmail.com',
-    keywords=['ROS2', 'rqt', 'joystick'],
-    description='RQt plugin that simulates joystick input and publishes sensor_msgs/Joy messages.',
+    keywords=['ROS2', 'rqt', 'joystick', 'twist', 'cmd_vel', 'teleop'],
+    description='RQt plugin that simulates joystick input and publishes sensor_msgs/Joy and geometry_msgs/Twist.',
     license='BSD',
     entry_points={
         'console_scripts': [

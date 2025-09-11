@@ -1,7 +1,7 @@
 <library path="src">
   <class name="VirtualJoystick" type="rqt_virtual_joystick.virtual_joystick.VirtualJoystick" base_class_type="rqt_gui_py::Plugin">
     <description>
-      Simulate joystick axes and buttons and publish sensor_msgs/Joy messages.
+      Simulate joystick axes and buttons and publish sensor_msgs/Joy and geometry_msgs/Twist (cmd_vel) messages.
     </description>
     <qtgui>
       <group>
@@ -11,7 +11,7 @@
       </group>
       <label>Virtual Joystick</label>
       <icon type="theme">input-gaming</icon>
-      <statustip>Interactively publish synthetic joystick input to /joy or chosen topic.</statustip>
+      <statustip>Interactively publish synthetic joystick input to /joy and optional cmd_vel Twist.</statustip>
     </qtgui>
   </class>
 </library>
