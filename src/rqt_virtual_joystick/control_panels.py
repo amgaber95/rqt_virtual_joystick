@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from typing import Optional
 
-from python_qt_binding.QtCore import Qt, pyqtSlot
+from python_qt_binding.QtCore import Qt, QSize, pyqtSlot
 from python_qt_binding.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
     QSlider,
+    QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -28,18 +30,67 @@ from .config_manager import (
 from .segmented_toggle import SegmentedToggle
 
 
-class _ControlPanel(QGroupBox):
-    """Shared helpers for control group boxes."""
+_QT_MAX_SIZE = 16777215
+
+
+class _ControlPanel(QFrame):
+    """Shared helpers for collapsible control panels."""
 
     LABEL_MIN_WIDTH = 90
     VALUE_PLACEHOLDER_WIDTH = 40
 
     def __init__(self, title: str, config_manager: ConfigurationManager, parent: Optional[QWidget] = None):
-        super().__init__(title, parent)
+        super().__init__(parent)
         self._config_manager = config_manager
         self._label_min_width = self.LABEL_MIN_WIDTH
         self._value_placeholder_width = self.VALUE_PLACEHOLDER_WIDTH
-        self._apply_groupbox_style()
+
+        self.setObjectName("control-panel")
+
+        self._header_button = QToolButton(self)
+        self._header_button.setObjectName("control-panel-toggle")
+        self._header_button.setText(title)
+        self._header_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._header_button.setArrowType(Qt.RightArrow)
+        self._header_button.setCheckable(True)
+        self._header_button.setChecked(False)
+        self._header_button.setAutoRaise(True)
+        self._header_button.setFocusPolicy(Qt.NoFocus)
+        self._header_button.setIconSize(QSize(12, 12))
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(6)
+        header_layout.addWidget(self._header_button)
+        header_layout.addStretch(1)
+
+        self._separator = QFrame(self)
+        self._separator.setObjectName("control-panel-separator")
+        self._separator.setFrameShape(QFrame.HLine)
+        self._separator.setFrameShadow(QFrame.Sunken)
+
+        self._body_widget = QWidget(self)
+        self._body_layout = QVBoxLayout()
+        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        self._body_layout.setSpacing(12)
+        self._body_widget.setLayout(self._body_layout)
+        self._body_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(10, 10, 10, 10)
+        outer_layout.setSpacing(6)
+        outer_layout.addLayout(header_layout)
+        outer_layout.addWidget(self._separator)
+        outer_layout.addWidget(self._body_widget)
+        self.setLayout(outer_layout)
+
+        self._header_button.toggled.connect(self._on_header_toggled)
+        self._apply_frame_style()
+        self.setProperty("collapsed", True)
+        self._separator.setVisible(False)
+        self._body_widget.setVisible(False)
+        self._body_widget.setMinimumHeight(0)
+        self._body_widget.setMaximumHeight(0)
 
     def _label(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -57,25 +108,65 @@ class _ControlPanel(QGroupBox):
         placeholder.setFixedWidth(self._value_placeholder_width)
         return placeholder
 
-    def _apply_groupbox_style(self) -> None:
+    def _apply_frame_style(self) -> None:
+        self.setFrameShape(QFrame.NoFrame)
         self.setStyleSheet(
             """
-            QGroupBox {
-                font-weight: bold;
-                border: 1px solid #3A3A3A;
-                margin-top: 0.5em;
-                padding: 0px;
+            QFrame#control-panel {
+                background-color: #2d3036;
+                border: 1px solid #444952;
+                border-radius: 8px;
             }
-
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                left: 8px;
-                top: -1px;
-                padding: 0px 4px;
+            QToolButton#control-panel-toggle {
+                color: #f4f5f7;
+                font-weight: 600;
+                padding: 4px 8px;
+                background-color: transparent;
+            }
+            QToolButton#control-panel-toggle:hover {
+                color: #ffffff;
+                background-color: transparent;
+            }
+            QToolButton#control-panel-toggle:pressed {
+                background-color: transparent;
+            }
+            QFrame#control-panel QLabel { 
+                color: #d9dce2;
+            }
+            QFrame#control-panel-separator {
+                border: none;
+                background-color: #3a3f48;
+                min-height: 1px;
+                max-height: 1px;
             }
             """
         )
+
+    def _on_header_toggled(self, expanded: bool) -> None:
+        self._header_button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        self._separator.setVisible(expanded)
+        self._body_widget.setVisible(expanded)
+        if expanded:
+            self._body_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            self._body_widget.setMaximumHeight(_QT_MAX_SIZE)
+            self._body_widget.setMinimumHeight(0)
+        else:
+            self._body_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self._body_widget.setMaximumHeight(0)
+            self._body_widget.setMinimumHeight(0)
+        self.setProperty("collapsed", not expanded)
+        style = self.style()
+        if style is not None:
+            style.unpolish(self)
+            style.polish(self)
+        self.update()
+        self.updateGeometry()
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._header_button.setChecked(not collapsed)
+
+    def is_collapsed(self) -> bool:
+        return not self._header_button.isChecked()
 
 
 class JoyOutputPanel(_ControlPanel):
@@ -108,7 +199,8 @@ class JoyOutputPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        layout.setVerticalSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setVerticalSpacing(5)
         layout.setColumnStretch(0, 0)
         layout.setColumnStretch(1, 1)
         layout.setColumnStretch(2, 0)
@@ -137,7 +229,7 @@ class JoyOutputPanel(_ControlPanel):
         self._rate_label = self._value_label()
         layout.addWidget(self._rate_label, row, 2)
 
-        self.setLayout(layout)
+        self._body_layout.addLayout(layout)
 
     def _connect_signals(self) -> None:
         self._publish_toggle.toggled.connect(self._config_manager.set_publish_enabled)
@@ -245,7 +337,8 @@ class TwistOutputPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        layout.setVerticalSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setVerticalSpacing(5)
         layout.setColumnStretch(0, 0)
         layout.setColumnStretch(1, 1)
         layout.setColumnStretch(2, 0)
@@ -307,7 +400,7 @@ class TwistOutputPanel(_ControlPanel):
         holonomic_container.setLayout(holonomic_layout)
         layout.addWidget(holonomic_container, row, 1, 1, 2)
 
-        self.setLayout(layout)
+        self._body_layout.addLayout(layout)
 
     def _connect_signals(self) -> None:
         self._twist_publish_toggle.toggled.connect(self._config_manager.set_twist_publish_enabled)
@@ -438,7 +531,8 @@ class JoystickConfigPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        layout.setVerticalSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setVerticalSpacing(5)
         layout.setColumnStretch(0, 0)
         layout.setColumnStretch(1, 1)
         layout.setColumnStretch(2, 0)
@@ -484,7 +578,7 @@ class JoystickConfigPanel(_ControlPanel):
         layout.addWidget(self._sticky_buttons_checkbox, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
 
-        self.setLayout(layout)
+        self._body_layout.addLayout(layout)
 
     def _connect_signals(self) -> None:
         self._dead_zone_slider.valueChanged.connect(self._on_dead_zone_changed)

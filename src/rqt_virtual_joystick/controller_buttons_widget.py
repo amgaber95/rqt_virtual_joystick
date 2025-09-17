@@ -175,7 +175,7 @@ class ControllerButtonsWidget(QWidget):
     def __init__(self, parent=None, sticky_buttons: bool = False):
         super().__init__(parent)
         # Set a reasonable size range
-        self.setMinimumSize(200, 200)
+        self.setFixedSize(200, 200)
         self._pressed_buttons: Set[int] = set()
         self._buttons: Dict[str, ControllerButton] = {}
         self._sticky_buttons = sticky_buttons
