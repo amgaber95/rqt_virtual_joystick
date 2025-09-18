@@ -353,7 +353,7 @@ class TwistOutputPanel(_ControlPanel):
         layout.addWidget(self._label("Topic:"), row, 0)
         self._twist_topic_combo = QComboBox()
         self._twist_topic_combo.setEditable(True)
-        self._twist_topic_combo.addItems(["/cmd_vel", "cmd_vel", "robot/cmd_vel"])
+        self._twist_topic_combo.addItems(["cmd_vel", "virtualjoy/cmd_vel"])
         self._twist_topic_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self._twist_topic_combo, row, 1)
         layout.addWidget(self._placeholder(), row, 2)

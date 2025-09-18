@@ -394,9 +394,9 @@ class ConfigurationManager(QObject):
         self.set_sticky_buttons(sticky_enabled)
 
         try:
-            self.set_twist_topic(settings.value('twist_topic', '/cmd_vel'))
+            self.set_twist_topic(settings.value('twist_topic', 'cmd_vel'))
         except ValueError:
-            self.set_twist_topic('/cmd_vel')
+            self.set_twist_topic('cmd_vel')
 
         twist_rate = safe_convert(settings.value('twist_publish_rate'), float, 20.0)
         try:

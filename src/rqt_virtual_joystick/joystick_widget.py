@@ -510,9 +510,9 @@ class JoystickWidget(QWidget):
             self._stop_update_timer()
             self._apply_return_to_center(emit_signal=True)
 
-    def keyPressEvent(self, event):  # noqa: D401 - Qt override
+    def keyPressEvent(self, event):
         x, y = self._position
-        step = 0.1
+        step = 0.05
         changed = False
 
         if event.key() == Qt.Key_Left:
