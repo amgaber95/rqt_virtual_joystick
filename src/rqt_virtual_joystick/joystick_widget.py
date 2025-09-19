@@ -1,6 +1,10 @@
+from __future__ import annotations
 import math
-from typing import Tuple
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Tuple, Optional
 
+# Qt
 from python_qt_binding.QtCore import Qt, QRect, QSize, QTimer, pyqtSignal, QPoint
 from python_qt_binding.QtGui import (
     QPainter,
@@ -14,70 +18,288 @@ from python_qt_binding.QtGui import (
 )
 from python_qt_binding.QtWidgets import QWidget
 
-from .config_manager import (
-    ConfigurationManager,
-    RETURN_MODE_BOTH,
-    RETURN_MODE_HORIZONTAL,
-    RETURN_MODE_NONE,
-    RETURN_MODE_VERTICAL,
-)
 
+class ReturnMode(Enum):
+    """How the stick returns to center on release."""
+    BOTH = auto()
+    HORIZONTAL = auto()
+    VERTICAL = auto()
+    NONE = auto()
+
+
+@dataclass
+class JoystickConfig:
+    """configuration consumed by the widget/state."""
+    publish_rate_hz: float = 50.0
+    dead_zone: float = 0.0           # circular [0..1]
+    dead_zone_x: float = 0.0         # axis X [0..1]
+    dead_zone_y: float = 0.0         # axis Y [0..1]
+    expo_x: float = 0.0              # percent [0..100]
+    expo_y: float = 0.0              # percent [0..100]
+    return_mode: ReturnMode = ReturnMode.BOTH
+    renormalize_after_axis_deadzone: bool = False
+
+
+@dataclass(frozen=True)
+class JoystickSnapshot:
+    """Immutable view of current stick state for painting/UI."""
+    raw_x: float
+    raw_y: float
+    x: float            # processed
+    y: float            # processed
+    in_dead: bool
+    in_x_dead: bool
+    in_y_dead: bool
+
+
+def clamp_unit(v: float) -> float:
+    """Clamp to [-1, 1]."""
+    return max(-1.0, min(1.0, v))
+
+
+def apply_dead_zones(x: float, y: float, dz: float, dzx: float, dzy: float) -> Tuple[float, float, bool, bool, bool]:
+    """
+    Return (x', y', in_both_dead, in_x_dead, in_y_dead).
+    Applies circular then per-axis dead zones (no renormalization).
+    """
+    distance = math.sqrt(x * x + y * y)
+    in_circular_dead = distance < dz
+
+    if in_circular_dead:
+        return (0.0, 0.0, True, True, True)
+
+    in_x_dead = abs(x) < dzx
+    in_y_dead = abs(y) < dzy
+    in_both_dead = in_x_dead and in_y_dead
+
+    result_x = 0.0 if in_x_dead else x
+    result_y = 0.0 if in_y_dead else y
+    
+    return (result_x, result_y, in_both_dead, in_x_dead, in_y_dead)
+
+
+def renorm_after_axis_dz(v: float, dz_axis: float) -> float:
+    """Optional: preserve full travel after axis dead zone."""
+    if abs(v) <= dz_axis:
+        return 0.0
+    
+    sign = 1.0 if v >= 0.0 else -1.0
+    abs_v = abs(v)
+    
+    # Renormalize from [dz_axis, 1.0] to [0.0, 1.0]
+    renormed = (abs_v - dz_axis) / (1.0 - dz_axis)
+    return sign * renormed
+
+
+def apply_expo(v: float, expo_pct: float) -> float:
+    """Cubic mix between linear and v^3 per expo percentage."""
+    if expo_pct <= 0.0 or v == 0.0:
+        return v
+    
+    expo_factor = expo_pct / 100.0
+    sign = 1.0 if v >= 0.0 else -1.0
+    abs_v = abs(v)
+    
+    # Mix between linear and cubic
+    result = abs_v * (1.0 - expo_factor) + (abs_v ** 3) * expo_factor
+    return sign * result
+
+
+class JoystickState:
+    """
+    Holds raw/processed values and flags.
+    Responsibilities:
+      - Ingest raw inputs [-1,1]
+      - Recompute processed outputs using config (dead zones, renorm, expo)
+      - Provide immutable snapshots for painting
+    """
+
+    def __init__(self, cfg: JoystickConfig) -> None:
+        self._config = cfg
+        self._raw_x = 0.0
+        self._raw_y = 0.0
+        self._x = 0.0
+        self._y = 0.0
+        self._in_dead = False
+        self._in_x_dead = False
+        self._in_y_dead = False
+
+    def set_config(self, cfg: JoystickConfig) -> None:
+        self._config = cfg
+        self.recompute()
+
+    def get_config(self) -> JoystickConfig:
+        return self._config
+
+    def ingest_raw(self, rx: float, ry: float) -> None:
+        self._raw_x = clamp_unit(rx)
+        self._raw_y = clamp_unit(ry)
+        self.recompute()
+
+    def recompute(self) -> None:
+        # Apply dead zones
+        x, y, in_dead, in_x_dead, in_y_dead = apply_dead_zones(
+            self._raw_x, self._raw_y,
+            self._config.dead_zone,
+            self._config.dead_zone_x,
+            self._config.dead_zone_y
+        )
+        
+        # Optional renormalization after axis dead zones
+        if self._config.renormalize_after_axis_deadzone:
+            if not in_x_dead:
+                x = renorm_after_axis_dz(x, self._config.dead_zone_x)
+            if not in_y_dead:
+                y = renorm_after_axis_dz(y, self._config.dead_zone_y)
+        
+        # Apply exponential response
+        x = apply_expo(x, self._config.expo_x)
+        y = apply_expo(y, self._config.expo_y)
+        
+        # Update state
+        self._x = x
+        self._y = y
+        self._in_dead = in_dead
+        self._in_x_dead = in_x_dead
+        self._in_y_dead = in_y_dead
+
+    def apply_return(self, mode: ReturnMode) -> None:
+        if mode == ReturnMode.BOTH:
+            self.ingest_raw(0.0, 0.0)
+        elif mode == ReturnMode.HORIZONTAL:
+            self.ingest_raw(0.0, self._raw_y)
+        elif mode == ReturnMode.VERTICAL:
+            self.ingest_raw(self._raw_x, 0.0)
+        # ReturnMode.NONE does nothing
+
+    def raw(self) -> Tuple[float, float]:
+        return (self._raw_x, self._raw_y)
+
+    def processed(self) -> Tuple[float, float]:
+        return (self._x, self._y)
+
+    def flags(self) -> Tuple[bool, bool, bool]:
+        """Return (in_dead, in_x_dead, in_y_dead)."""
+        return (self._in_dead, self._in_x_dead, self._in_y_dead)
+
+    def snapshot(self) -> JoystickSnapshot:
+        return JoystickSnapshot(
+            raw_x=self._raw_x,
+            raw_y=self._raw_y,
+            x=self._x,
+            y=self._y,
+            in_dead=self._in_dead,
+            in_x_dead=self._in_x_dead,
+            in_y_dead=self._in_y_dead
+        )
+
+
+# =========================== Widget (View/Controller) =========================
 
 class JoystickWidget(QWidget):
-    """Visual joystick widget with mouse and keyboard interaction."""
+    """
+    Joystick widget with its own config & state.
+    - Emits processed position at a configurable rate while pressed.
+    - Exposes simple config setters/getters (no external manager dependency).
+    """
 
-    position_changed = pyqtSignal(float, float)
+    # Signals
+    position_changed = pyqtSignal(float, float)        # processed (after DZ/expo)
+    position_raw_changed = pyqtSignal(float, float)    # raw (before DZ/expo)
 
-    def __init__(self, config_manager: ConfigurationManager, parent=None):
+    def __init__(self, config: Optional[JoystickConfig] = None, parent=None) -> None:
         super().__init__(parent)
-
-        self._config_manager = config_manager
-        self._position = (0.0, 0.0)
-        self._raw_position = (0.0, 0.0)
-        self._is_in_dead_zone = False
-        self._is_in_x_dead_zone = False
-        self._is_in_y_dead_zone = False
-        self._handle_radius = 12
-        self._pressed = False
-
-        self.setMinimumSize(200, 200)
-        self.setFocusPolicy(Qt.StrongFocus)
-
-        self._update_timer = QTimer(self)
-        self._update_timer.timeout.connect(self._emit_position_if_needed)
-
-        self._config_manager.rate_changed.connect(self._on_rate_changed)
-        self._config_manager.dead_zone_changed.connect(self._on_dead_zone_changed)
-        self._config_manager.expo_changed.connect(self._on_expo_changed)
-        self._config_manager.return_mode_changed.connect(self._on_return_mode_changed)
-        self._on_rate_changed(self._config_manager.get_publish_rate())
-
-    def _on_rate_changed(self, rate_hz: float):
-        if rate_hz <= 0:
-            return
-
-        interval_ms = max(1, int(1000.0 / rate_hz))
-        if self._update_timer.isActive():
-            self._update_timer.stop()
-        self._update_timer.setInterval(interval_ms)
         
-    def _on_dead_zone_changed(self) -> None:
-        # Re-apply dead zone logic to the last raw position
-        self._set_position(*self._raw_position, emit_signal=True)
+        self._config = config or JoystickConfig()
+        self._state = JoystickState(self._config)
+        self._pressed = False
+        self._handle_radius = 12
+        
+        self.setFixedSize(220, 220)
+        self.setFocusPolicy(Qt.StrongFocus)
+        
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._emit_position_if_needed)
+        self._apply_rate()
+
+    # ---- public config api (simple) ----
+    def get_config(self) -> JoystickConfig:
+        return self._config
+
+    def set_config(self, cfg: JoystickConfig) -> None:
+        old_processed = self._state.processed()
+        self._config = cfg
+        self._state.set_config(cfg)
+        self._apply_rate()
+        self._emit_if_changed(old_processed, self._state.processed())
         self.update()
 
-    def _on_expo_changed(self) -> None:
-        self._set_position(*self._raw_position, emit_signal=True)
+    def set_publish_rate(self, hz: float) -> None:
+        self._config.publish_rate_hz = max(0.1, hz)
+        self._apply_rate()
+
+    def set_dead_zone(self, v: float) -> None:
+        old_processed = self._state.processed()
+        self._config.dead_zone = max(0.0, min(1.0, v))
+        self._reprocess_last_input()
+        self._emit_if_changed(old_processed, self._state.processed())
+
+    def set_dead_zone_x(self, v: float) -> None:
+        old_processed = self._state.processed()
+        self._config.dead_zone_x = max(0.0, min(1.0, v))
+        self._reprocess_last_input()
+        self._emit_if_changed(old_processed, self._state.processed())
+
+    def set_dead_zone_y(self, v: float) -> None:
+        old_processed = self._state.processed()
+        self._config.dead_zone_y = max(0.0, min(1.0, v))
+        self._reprocess_last_input()
+        self._emit_if_changed(old_processed, self._state.processed())
+
+    def set_expo_x(self, pct: float) -> None:
+        old_processed = self._state.processed()
+        self._config.expo_x = max(0.0, min(100.0, pct))
+        self._reprocess_last_input()
+        self._emit_if_changed(old_processed, self._state.processed())
+
+    def set_expo_y(self, pct: float) -> None:
+        old_processed = self._state.processed()
+        self._config.expo_y = max(0.0, min(100.0, pct))
+        self._reprocess_last_input()
+        self._emit_if_changed(old_processed, self._state.processed())
+
+    def set_return_mode(self, mode: ReturnMode) -> None:
+        self._config.return_mode = mode
+
+    def set_renormalize_after_axis_deadzone(self, enabled: bool) -> None:
+        old_processed = self._state.processed()
+        self._config.renormalize_after_axis_deadzone = enabled
+        self._reprocess_last_input()
+        self._emit_if_changed(old_processed, self._state.processed())
+
+    # ---- public position api ----
+    def get_position(self) -> Tuple[float, float]:
+        return self._state.processed()
+
+    def get_raw_position(self) -> Tuple[float, float]:
+        return self._state.raw()
+
+    def set_position(self, x: float, y: float) -> None:
+        old_processed = self._state.processed()
+        old_raw = self._state.raw()
+        self._state.ingest_raw(x, y)
+        new_processed = self._state.processed()
+        new_raw = self._state.raw()
+        
+        if new_raw != old_raw:
+            self.position_raw_changed.emit(*new_raw)
+        self._emit_if_changed(old_processed, new_processed)
         self.update()
 
-    def _on_return_mode_changed(self, _mode: str) -> None:
-        if not self._pressed:
-            self._apply_return_to_center(emit_signal=True)
+    def reset_position(self) -> None:
+        self.set_position(0.0, 0.0)
 
-    def sizeHint(self) -> QSize:
-        return QSize(250, 250)
-
-    def paintEvent(self, event):
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
@@ -88,14 +310,16 @@ class JoystickWidget(QWidget):
         center_y = height // 2
         radius = size // 2 - 5
 
+        snap = self._state.snapshot()
+
         self._draw_outer_circle(painter, center_x, center_y, radius)
         self._draw_dead_zone(painter, center_x, center_y, radius)
         self._draw_expo_visual(painter, center_x, center_y, radius)
         self._draw_axes(painter, center_x, center_y, radius)
         self._draw_polar_grid(painter, center_x, center_y, radius)
         self._draw_center_marker(painter, center_x, center_y)
-        self._draw_handle(painter, center_x, center_y, radius)
-        self._draw_handle_info(painter)
+        self._draw_handle(painter, center_x, center_y, radius, snap)
+        self._draw_handle_info(painter, center_x, center_y, radius, snap)
 
     def _draw_outer_circle(self, painter: QPainter, center_x: int, center_y: int, radius: int):
         painter.save()
@@ -140,7 +364,7 @@ class JoystickWidget(QWidget):
 
         base_color = QColor(255, 100, 100)
 
-        dead_zone = self._config_manager.get_dead_zone()
+        dead_zone = self._config.dead_zone
         if dead_zone > 0.0:
             dead_zone_radius = int(radius * dead_zone)
 
@@ -165,8 +389,8 @@ class JoystickWidget(QWidget):
         painter.restore()
 
     def _draw_expo_visual(self, painter: QPainter, center_x: int, center_y: int, radius: int) -> None:
-        expo_x = self._config_manager.get_expo_x()
-        expo_y = self._config_manager.get_expo_y()
+        expo_x = self._config.expo_x
+        expo_y = self._config.expo_y
         if expo_x <= 0.0 and expo_y <= 0.0:
             return
 
@@ -236,7 +460,7 @@ class JoystickWidget(QWidget):
         radius: int,
         base_color: QColor,
     ) -> None:
-        dead_zone_x = self._config_manager.get_dead_zone_x()
+        dead_zone_x = self._config.dead_zone_x
         if dead_zone_x <= 0.0:
             return
 
@@ -270,7 +494,7 @@ class JoystickWidget(QWidget):
         radius: int,
         base_color: QColor,
     ) -> None:
-        dead_zone_y = self._config_manager.get_dead_zone_y()
+        dead_zone_y = self._config.dead_zone_y
         if dead_zone_y <= 0.0:
             return
 
@@ -391,12 +615,11 @@ class JoystickWidget(QWidget):
         painter.drawLine(center_x, center_y + 5, center_x, center_y + 8)
         painter.restore()
 
-    def _draw_handle(self, painter: QPainter, center_x: int, center_y: int, radius: int):
+    def _draw_handle(self, painter: QPainter, center_x: int, center_y: int, radius: int, snap: JoystickSnapshot):
         painter.save()
 
-        x, y = self._position
-        handle_x = center_x + int(x * (radius - self._handle_radius))
-        handle_y = center_y - int(y * (radius - self._handle_radius))
+        handle_x = center_x + int(snap.x * (radius - self._handle_radius))
+        handle_y = center_y - int(snap.y * (radius - self._handle_radius))
 
         connection_pen = QPen(QColor(120, 120, 120, 150), 2, Qt.DashLine)
         painter.setPen(connection_pen)
@@ -411,10 +634,10 @@ class JoystickWidget(QWidget):
             self._handle_radius + 1,
         )
 
-        if self._is_in_dead_zone:
+        if snap.in_dead:
             base_color = QColor(255, 80, 80)
             glow_color = QColor(255, 120, 120, 100)
-        elif self._is_in_x_dead_zone or self._is_in_y_dead_zone:
+        elif snap.in_x_dead or snap.in_y_dead:
             base_color = QColor(255, 140, 60)
             glow_color = QColor(255, 180, 100, 100)
         else:
@@ -444,32 +667,24 @@ class JoystickWidget(QWidget):
 
         painter.restore()
 
-    def _draw_handle_info(self, painter: QPainter) -> None:
+    def _draw_handle_info(self, painter: QPainter, center_x: int, center_y: int, radius: int, snap: JoystickSnapshot) -> None:
         painter.save()
 
-        x, y = self._position
-        width = self.width()
-        height = self.height()
-        size = min(width, height)
-        center_x = width // 2
-        center_y = height // 2
-        radius = size // 2 - 5
-
-        handle_x = center_x + int(x * (radius - self._handle_radius))
-        handle_y = center_y - int(y * (radius - self._handle_radius))
+        handle_x = center_x + int(snap.x * (radius - self._handle_radius))
+        handle_y = center_y - int(snap.y * (radius - self._handle_radius))
 
         font = painter.font()
         font.setPointSize(max(font.pointSize() - 2, 9))
         painter.setFont(font)
 
-        coords_text = f"({x:+.2f}, {y:+.2f})"
+        coords_text = f"({snap.x:+.2f}, {snap.y:+.2f})"
         font_metrics = painter.fontMetrics()
         padding = 6
         text_width = font_metrics.horizontalAdvance(coords_text) + padding * 2
         text_height = font_metrics.height() + padding * 2
         offset = self._handle_radius + 8
 
-        if x <= 0.0:
+        if snap.x <= 0.0:
             rect_left = handle_x + offset
             alignment = Qt.AlignLeft | Qt.AlignVCenter
         else:
@@ -480,71 +695,82 @@ class JoystickWidget(QWidget):
         text_rect = QRect(rect_left, rect_top, text_width, text_height)
 
         min_margin = 5
+        widget_width = self.width()
+        widget_height = self.height()
         if text_rect.left() < min_margin:
             text_rect.moveLeft(min_margin)
-        if text_rect.right() > width - min_margin:
-            text_rect.moveRight(width - min_margin)
+        if text_rect.right() > widget_width - min_margin:
+            text_rect.moveRight(widget_width - min_margin)
         if text_rect.top() < min_margin:
             text_rect.moveTop(min_margin)
-        if text_rect.bottom() > height - min_margin:
-            text_rect.moveBottom(height - min_margin)
+        if text_rect.bottom() > widget_height - min_margin:
+            text_rect.moveBottom(widget_height - min_margin)
 
         painter.setPen(QPen(QColor(255, 255, 255)))
         painter.drawText(text_rect, alignment, coords_text)
         painter.restore()
 
-    def mousePressEvent(self, event):  # noqa: D401 - Qt override
-        if event.button() == Qt.LeftButton:
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton:
             self._pressed = True
-            self._update_position_from_mouse(event.x(), event.y())
+            self._update_from_mouse_xy(e.x(), e.y())
             self.setFocus()
-            self._start_update_timer()
+            if self._timer.interval() > 0:
+                self._timer.start()
 
-    def mouseMoveEvent(self, event):  # noqa: D401 - Qt override
+    def mouseMoveEvent(self, e) -> None:
         if self._pressed:
-            self._update_position_from_mouse(event.x(), event.y())
+            self._update_from_mouse_xy(e.x(), e.y())
 
-    def mouseReleaseEvent(self, event):  # noqa: D401 - Qt override
-        if event.button() == Qt.LeftButton:
+    def mouseReleaseEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton:
             self._pressed = False
-            self._stop_update_timer()
-            self._apply_return_to_center(emit_signal=True)
+            self._timer.stop()
+            old_processed = self._state.processed()
+            self._state.apply_return(self._config.return_mode)
+            self._emit_if_changed(old_processed, self._state.processed())
+            self.update()
 
-    def keyPressEvent(self, event):
-        x, y = self._position
+    def keyPressEvent(self, e) -> None:
+        x, y = self._state.processed()
         step = 0.05
         changed = False
 
-        if event.key() == Qt.Key_Left:
+        if e.key() == Qt.Key_Left:
             x = max(-1.0, x - step)
             changed = True
-        elif event.key() == Qt.Key_Right:
+        elif e.key() == Qt.Key_Right:
             x = min(1.0, x + step)
             changed = True
-        elif event.key() == Qt.Key_Up:
+        elif e.key() == Qt.Key_Up:
             y = min(1.0, y + step)
             changed = True
-        elif event.key() == Qt.Key_Down:
+        elif e.key() == Qt.Key_Down:
             y = max(-1.0, y - step)
             changed = True
-        elif event.key() == Qt.Key_Space:
+        elif e.key() == Qt.Key_Space:
             x, y = 0.0, 0.0
             changed = True
         else:
-            super().keyPressEvent(event)
+            super().keyPressEvent(e)
             return
 
         if changed:
-            self._set_position(x, y, emit_signal=True)
+            self.set_position(x, y)
 
-    def _update_position_from_mouse(self, mouse_x: int, mouse_y: int):
+    def reset_position(self):
+        self.set_position(0.0, 0.0)
+
+    # ---- internal helpers ----
+    def _update_from_mouse_xy(self, mx: int, my: int) -> None:
+        """Map widget coords → normalized raw [-1,1], update state, emit signals if changed."""
         center_x = self.width() // 2
         center_y = self.height() // 2
         radius = min(self.width(), self.height()) // 2 - 5
         max_distance = max(1, radius - self._handle_radius)
 
-        dx = mouse_x - center_x
-        dy = center_y - mouse_y
+        dx = mx - center_x
+        dy = center_y - my
         distance = math.sqrt(dx * dx + dy * dy)
 
         if distance > max_distance:
@@ -553,100 +779,61 @@ class JoystickWidget(QWidget):
 
         raw_x = dx / max_distance
         raw_y = dy / max_distance
+
+        old_processed = self._state.processed()
+        old_raw = self._state.raw()
+        self._state.ingest_raw(raw_x, raw_y)
+        new_processed = self._state.processed()
+        new_raw = self._state.raw()
         
-        self._set_position(raw_x, raw_y, emit_signal=True)
-        
-    def _set_position(self, x: float, y: float, emit_signal: bool = False):
-        x = max(-1.0, min(1.0, x))
-        y = max(-1.0, min(1.0, y))
+        if new_raw != old_raw:
+            self.position_raw_changed.emit(*new_raw)
+        self._emit_if_changed(old_processed, new_processed)
+        self.update()
 
-        self._raw_position = (x, y)
-        processed_x, processed_y = self._apply_dead_zones(x, y)
-        final_x, final_y = self._apply_exponential_response(processed_x, processed_y)
+    def _apply_rate(self) -> None:
+        if self._config.publish_rate_hz <= 0:
+            self._timer.setInterval(0)
+        else:
+            interval_ms = max(1, int(1000.0 / self._config.publish_rate_hz))
+            self._timer.setInterval(interval_ms)
 
-        should_emit = emit_signal and (not self._is_in_dead_zone or (final_x, final_y) == (0.0, 0.0))
+    def _emit_position_if_needed(self) -> None:
+        if self._pressed and not self._state.flags()[0]:  # not in_dead
+            self.position_changed.emit(*self._state.processed())
 
-        if (final_x, final_y) != self._position:
-            self._position = (final_x, final_y)
-            self.update()
-            if should_emit:
-                self.position_changed.emit(final_x, final_y)
-        elif should_emit:
-            self.position_changed.emit(final_x, final_y)
+    def _reprocess_last_input(self) -> None:
+        """Recompute from last raw using current config, repaint & emit if changed."""
+        self._state.recompute()
+        self.update()
 
-    def _apply_dead_zones(self, x: float, y: float) -> Tuple[float, float]:
-        dead_zone, dead_zone_x, dead_zone_y = self._config_manager.get_dead_zones()
+    def _emit_if_changed(self, before_xy: Tuple[float, float], after_xy: Tuple[float, float]) -> None:
+        if before_xy != after_xy:
+            self.position_changed.emit(*after_xy)
 
-        distance = math.sqrt(x * x + y * y)
-        in_circular_dead = distance < dead_zone
+    # ---- JoystickConfigAPI protocol implementation ----
+    def get_dead_zone(self) -> float:
+        return self._config.dead_zone
 
-        if in_circular_dead:
-            self._is_in_dead_zone = True
-            self._is_in_x_dead_zone = True
-            self._is_in_y_dead_zone = True
-            return (0.0, 0.0)
+    def get_dead_zone_x(self) -> float:
+        return self._config.dead_zone_x
 
-        self._is_in_x_dead_zone = abs(x) < dead_zone_x
-        self._is_in_y_dead_zone = abs(y) < dead_zone_y
-        self._is_in_dead_zone = self._is_in_x_dead_zone and self._is_in_y_dead_zone
+    def get_dead_zone_y(self) -> float:
+        return self._config.dead_zone_y
 
-        result_x = 0.0 if self._is_in_x_dead_zone else x
-        result_y = 0.0 if self._is_in_y_dead_zone else y
-        return (result_x, result_y)
+    def get_expo_x(self) -> float:
+        return self._config.expo_x
 
-    def _apply_exponential_response(self, x: float, y: float) -> Tuple[float, float]:
-        expo_x = self._config_manager.get_expo_x()
-        expo_y = self._config_manager.get_expo_y()
+    def get_expo_y(self) -> float:
+        return self._config.expo_y
 
-        adjusted_x = x
-        adjusted_y = y
+    def get_return_mode(self) -> 'ReturnMode':
+        return self._config.return_mode
 
-        if expo_x > 0.0 and x != 0.0:
-            expo_factor_x = expo_x / 100.0
-            sign_x = 1.0 if x > 0.0 else -1.0
-            abs_x = abs(x)
-            adjusted_x = sign_x * (abs_x * (1.0 - expo_factor_x) + (abs_x ** 3) * expo_factor_x)
+    def get_sticky_buttons(self) -> bool:
+        # This widget doesn't handle buttons, but return False for protocol compliance
+        return False
 
-        if expo_y > 0.0 and y != 0.0:
-            expo_factor_y = expo_y / 100.0
-            sign_y = 1.0 if y > 0.0 else -1.0
-            abs_y = abs(y)
-            adjusted_y = sign_y * (abs_y * (1.0 - expo_factor_y) + (abs_y ** 3) * expo_factor_y)
-
-        return (adjusted_x, adjusted_y)
-
-    def _start_update_timer(self):
-        if not self._update_timer.isActive():
-            self._update_timer.start()
-
-    def _stop_update_timer(self):
-        if self._update_timer.isActive():
-            self._update_timer.stop()
-
-    def _emit_position_if_needed(self):
-        if self._pressed and not self._is_in_dead_zone:
-            self.position_changed.emit(*self._position)
-
-    def _apply_return_to_center(self, emit_signal: bool = False) -> None:
-        mode = self._config_manager.get_return_mode()
-
-        x, y = self._position
-        if mode == RETURN_MODE_BOTH:
-            x, y = 0.0, 0.0
-        elif mode == RETURN_MODE_HORIZONTAL:
-            x = 0.0
-        elif mode == RETURN_MODE_VERTICAL:
-            y = 0.0
-        elif mode == RETURN_MODE_NONE:
-            return
-
-        self._set_position(x, y, emit_signal=emit_signal)
-
-    def get_position(self) -> Tuple[float, float]:
-        return self._position
-
-    def set_position(self, x: float, y: float):
-        self._set_position(x, y, emit_signal=True)
-
-    def reset_position(self):
-        self._set_position(0.0, 0.0, emit_signal=True)
+    def set_sticky_buttons(self, on: bool) -> None:
+        # This widget doesn't handle buttons, but accept the call for protocol compliance
+        pass
