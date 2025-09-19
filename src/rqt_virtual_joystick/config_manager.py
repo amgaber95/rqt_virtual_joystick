@@ -25,12 +25,13 @@ class JoystickConfig:
     publish_enabled: bool = True
     sticky_buttons: bool = False
     return_mode: str = RETURN_MODE_BOTH
-    twist_topic: str = "/cmd_vel"
+    twist_topic: str = "cmd_vel"
     twist_publish_rate: float = 20.0
     twist_publish_enabled: bool = False
     twist_linear_scale: float = 0.5
     twist_angular_scale: float = 1.0
     twist_holonomic: bool = False
+    twist_use_stamped: bool = False
 
     def __post_init__(self):
         self.validate()
@@ -98,6 +99,7 @@ class ConfigurationManager(QObject):
     twist_publish_enabled_changed = pyqtSignal(bool)
     twist_scales_changed = pyqtSignal()
     twist_holonomic_changed = pyqtSignal(bool)
+    twist_use_stamped_changed = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -298,6 +300,16 @@ class ConfigurationManager(QObject):
             self.twist_holonomic_changed.emit(enabled)
             self.config_changed.emit()
 
+    def is_twist_use_stamped_enabled(self) -> bool:
+        return self._config.twist_use_stamped
+
+    def set_twist_use_stamped(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled != self._config.twist_use_stamped:
+            self._config.twist_use_stamped = enabled
+            self.twist_use_stamped_changed.emit(enabled)
+            self.config_changed.emit()
+
     def save_settings(self, settings) -> None:
         settings.set_value('topic_name', self._config.topic_name)
         settings.set_value('publish_rate', self._config.publish_rate)
@@ -315,6 +327,7 @@ class ConfigurationManager(QObject):
         settings.set_value('twist_linear_scale', self._config.twist_linear_scale)
         settings.set_value('twist_angular_scale', self._config.twist_angular_scale)
         settings.set_value('twist_holonomic', self._config.twist_holonomic)
+        settings.set_value('twist_use_stamped', self._config.twist_use_stamped)
 
     def restore_settings(self, settings) -> None:
         def safe_convert(value, converter, default):
@@ -428,3 +441,12 @@ class ConfigurationManager(QObject):
         else:
             holonomic_enabled = bool(holonomic_value)
         self.set_twist_holonomic(holonomic_enabled)
+
+        stamped_value = settings.value('twist_use_stamped')
+        if isinstance(stamped_value, str):
+            stamped_enabled = stamped_value.lower() in ('1', 'true', 'yes', 'on')
+        elif stamped_value is None:
+            stamped_enabled = False
+        else:
+            stamped_enabled = bool(stamped_value)
+        self.set_twist_use_stamped(stamped_enabled)

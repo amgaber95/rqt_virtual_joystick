@@ -316,6 +316,11 @@ class TwistOutputPanel(_ControlPanel):
         self._twist_publish_toggle.setChecked(enabled)
         self._twist_publish_toggle.blockSignals(False)
 
+        use_stamped = self._config_manager.is_twist_use_stamped_enabled()
+        self._twist_stamped_checkbox.blockSignals(True)
+        self._twist_stamped_checkbox.setChecked(use_stamped)
+        self._twist_stamped_checkbox.blockSignals(False)
+
         rate = int(self._config_manager.get_twist_publish_rate())
         self._twist_rate_slider.blockSignals(True)
         self._twist_rate_slider.setValue(rate)
@@ -347,6 +352,12 @@ class TwistOutputPanel(_ControlPanel):
         layout.addWidget(self._label("Publish:"), row, 0)
         self._twist_publish_toggle = SegmentedToggle(false_label="Disabled", true_label="Enabled")
         layout.addWidget(self._twist_publish_toggle, row, 1)
+        layout.addWidget(self._placeholder(), row, 2)
+
+        row += 1
+        layout.addWidget(self._label("Stamp Header:"), row, 0)
+        self._twist_stamped_checkbox = QCheckBox()
+        layout.addWidget(self._twist_stamped_checkbox, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
 
         row += 1
@@ -404,6 +415,7 @@ class TwistOutputPanel(_ControlPanel):
 
     def _connect_signals(self) -> None:
         self._twist_publish_toggle.toggled.connect(self._config_manager.set_twist_publish_enabled)
+        self._twist_stamped_checkbox.toggled.connect(self._config_manager.set_twist_use_stamped)
         self._twist_topic_combo.activated[str].connect(self._on_topic_activated)
         topic_line_edit = self._twist_topic_combo.lineEdit()
         if topic_line_edit:
@@ -415,6 +427,7 @@ class TwistOutputPanel(_ControlPanel):
         self._twist_holonomic_checkbox.toggled.connect(self._config_manager.set_twist_holonomic)
 
         self._config_manager.twist_publish_enabled_changed.connect(self._on_enabled_changed)
+        self._config_manager.twist_use_stamped_changed.connect(self._on_use_stamped_changed)
         self._config_manager.twist_topic_changed.connect(self._on_topic_changed)
         self._config_manager.twist_rate_changed.connect(self._on_rate_updated)
         self._config_manager.twist_scales_changed.connect(self._on_scales_updated)
@@ -463,6 +476,12 @@ class TwistOutputPanel(_ControlPanel):
         self._twist_publish_toggle.blockSignals(True)
         self._twist_publish_toggle.setChecked(enabled)
         self._twist_publish_toggle.blockSignals(False)
+
+    @pyqtSlot(bool)
+    def _on_use_stamped_changed(self, enabled: bool) -> None:
+        self._twist_stamped_checkbox.blockSignals(True)
+        self._twist_stamped_checkbox.setChecked(enabled)
+        self._twist_stamped_checkbox.blockSignals(False)
 
     @pyqtSlot(str)
     def _on_topic_changed(self, topic_name: str) -> None:
