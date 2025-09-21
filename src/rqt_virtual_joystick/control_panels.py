@@ -1,8 +1,7 @@
-"""Reusable control panels for configuring the virtual joystick plugin."""
-
 from __future__ import annotations
 
-from typing import Optional
+from contextlib import contextmanager
+from typing import Optional, Protocol, Tuple
 
 from python_qt_binding.QtCore import Qt, QSize, pyqtSlot
 from python_qt_binding.QtWidgets import (
@@ -20,28 +19,91 @@ from python_qt_binding.QtWidgets import (
     QWidget,
 )
 
-from .config_manager import (
-    ConfigurationManager,
-    RETURN_MODE_BOTH,
-    RETURN_MODE_HORIZONTAL,
-    RETURN_MODE_NONE,
-    RETURN_MODE_VERTICAL,
-)
+from .joystick_widget import ReturnMode
 from .segmented_toggle import SegmentedToggle
 
 
 _QT_MAX_SIZE = 16777215
 
 
-class _ControlPanel(QFrame):
-    """Shared helpers for collapsible control panels."""
+@contextmanager
+def blocked(widget):
+    widget.blockSignals(True)
+    try:
+        yield widget
+    finally:
+        widget.blockSignals(False)
 
+
+class SliderRow:
+    """Convenience wrapper pairing a slider with a display label."""
+
+    def __init__(self, parent, min_v: int, max_v: int, suffix: str = "") -> None:
+        self._slider = QSlider(Qt.Horizontal, parent)
+        self._slider.setRange(min_v, max_v)
+        self._label = QLabel(parent)
+        self._suffix = suffix
+
+    def slider(self) -> QSlider:
+        return self._slider
+
+    def label(self) -> QLabel:
+        return self._label
+
+    def set(self, value: int) -> None:
+        with blocked(self._slider):
+            self._slider.setValue(value)
+        self._label.setText(f"{value}{self._suffix}")
+
+
+class JoyOutputAPI(Protocol):
+    def get_enabled(self) -> bool: ...
+    def set_enabled(self, on: bool) -> None: ...
+    def get_topic(self) -> str: ...
+    def set_topic(self, name: str) -> None: ...
+    def get_rate_hz(self) -> float: ...
+    def set_rate_hz(self, hz: float) -> None: ...
+
+
+class TwistOutputAPI(Protocol):
+    def get_enabled(self) -> bool: ...
+    def set_enabled(self, on: bool) -> None: ...
+    def get_topic(self) -> str: ...
+    def set_topic(self, name: str) -> None: ...
+    def get_rate_hz(self) -> float: ...
+    def set_rate_hz(self, hz: float) -> None: ...
+    def get_scales(self) -> Tuple[float, float]: ...
+    def set_scales(self, linear: float, angular: float) -> None: ...
+    def get_use_stamped(self) -> bool: ...
+    def set_use_stamped(self, on: bool) -> None: ...
+    def get_holonomic(self) -> bool: ...
+    def set_holonomic(self, on: bool) -> None: ...
+
+
+class JoystickConfigAPI(Protocol):
+    def get_dead_zone(self) -> float: ...
+    def set_dead_zone(self, v: float) -> None: ...
+    def get_dead_zone_x(self) -> float: ...
+    def set_dead_zone_x(self, v: float) -> None: ...
+    def get_dead_zone_y(self) -> float: ...
+    def set_dead_zone_y(self, v: float) -> None: ...
+    def get_expo_x(self) -> float: ...
+    def set_expo_x(self, pct: float) -> None: ...
+    def get_expo_y(self) -> float: ...
+    def set_expo_y(self, pct: float) -> None: ...
+    def get_return_mode(self) -> ReturnMode: ...
+    def set_return_mode(self, mode: ReturnMode) -> None: ...
+    def get_sticky_buttons(self) -> bool: ...
+    def set_sticky_buttons(self, on: bool) -> None: ...
+
+
+
+class _ControlPanel(QFrame):
     LABEL_MIN_WIDTH = 90
     VALUE_PLACEHOLDER_WIDTH = 40
 
-    def __init__(self, title: str, config_manager: ConfigurationManager, parent: Optional[QWidget] = None):
+    def __init__(self, title: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self._config_manager = config_manager
         self._label_min_width = self.LABEL_MIN_WIDTH
         self._value_placeholder_width = self.VALUE_PLACEHOLDER_WIDTH
 
@@ -71,10 +133,10 @@ class _ControlPanel(QFrame):
 
         self._body_widget = QWidget(self)
         self._body_layout = QVBoxLayout()
-        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        # self._body_layout.setContentsMargins(0, 0, 0, 0)
         self._body_layout.setSpacing(12)
         self._body_widget.setLayout(self._body_layout)
-        self._body_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # self._body_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         outer_layout = QVBoxLayout()
         outer_layout.setContentsMargins(10, 10, 10, 10)
@@ -86,7 +148,9 @@ class _ControlPanel(QFrame):
 
         self._header_button.toggled.connect(self._on_header_toggled)
         self._apply_frame_style()
+        # Start collapsed by default - settings will override if needed
         self.setProperty("collapsed", True)
+        self._header_button.setChecked(False)  # Collapsed state
         self._separator.setVisible(False)
         self._body_widget.setVisible(False)
         self._body_widget.setMinimumHeight(0)
@@ -130,7 +194,7 @@ class _ControlPanel(QFrame):
             QToolButton#control-panel-toggle:pressed {
                 background-color: transparent;
             }
-            QFrame#control-panel QLabel { 
+            QFrame#control-panel QLabel {
                 color: #d9dce2;
             }
             QFrame#control-panel-separator {
@@ -170,33 +234,29 @@ class _ControlPanel(QFrame):
 
 
 class JoyOutputPanel(_ControlPanel):
-    """Controls for configuring Joy message publishing."""
-
-    def __init__(self, config_manager: ConfigurationManager, parent: Optional[QWidget] = None):
-        super().__init__("Joy Output", config_manager, parent)
-        self._committed_topic_name = self._config_manager.get_topic_name()
+    def __init__(self, api: JoyOutputAPI, parent: Optional[QWidget] = None):
+        super().__init__("Joy Output", parent)
+        self._api = api
+        self._committed_topic = self._api.get_topic()
         self._build_ui()
-        self._connect_signals()
-        self.refresh_from_config()
+        self._wire()
+        self.refresh()
 
-    def refresh_from_config(self) -> None:
-        self._committed_topic_name = self._config_manager.get_topic_name()
+    def refresh(self) -> None:
+        self._committed_topic = self._api.get_topic()
+        with blocked(self._topic_combo):
+            self._topic_combo.setCurrentText(self._committed_topic)
 
-        self._topic_combo.blockSignals(True)
-        self._topic_combo.setCurrentText(self._committed_topic_name)
-        self._topic_combo.blockSignals(False)
+        enabled = self._api.get_enabled()
+        with blocked(self._publish_toggle):
+            self._publish_toggle.setChecked(enabled)
 
-        enabled = self._config_manager.is_publish_enabled()
-        self._publish_toggle.blockSignals(True)
-        self._publish_toggle.setChecked(enabled)
-        self._publish_toggle.blockSignals(False)
-
-        rate = int(self._config_manager.get_publish_rate())
-        self._rate_slider.blockSignals(True)
-        self._rate_slider.setValue(rate)
-        self._rate_slider.blockSignals(False)
+        rate = max(1, int(round(self._api.get_rate_hz())))
+        with blocked(self._rate_slider):
+            self._rate_slider.setValue(rate)
         self._rate_label.setText(f"{rate} Hz")
 
+    # Backwards compatibility for old code
     def _build_ui(self) -> None:
         layout = QGridLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -231,114 +291,78 @@ class JoyOutputPanel(_ControlPanel):
 
         self._body_layout.addLayout(layout)
 
-    def _connect_signals(self) -> None:
-        self._publish_toggle.toggled.connect(self._config_manager.set_publish_enabled)
+    def _wire(self) -> None:
+        self._publish_toggle.toggled.connect(self._api.set_enabled)
         self._topic_combo.activated[str].connect(self._on_topic_activated)
         topic_line_edit = self._topic_combo.lineEdit()
         if topic_line_edit:
             topic_line_edit.returnPressed.connect(self._on_topic_return_pressed)
-
         self._rate_slider.valueChanged.connect(self._on_rate_changed)
-
-        self._config_manager.publish_enabled_changed.connect(self._on_publish_enabled_changed)
-        self._config_manager.topic_changed.connect(self._on_topic_changed)
-        self._config_manager.rate_changed.connect(self._on_rate_updated)
 
     @pyqtSlot(str)
     def _on_topic_activated(self, topic_name: str) -> None:
-        self._commit_topic_name(topic_name)
+        self._commit_topic(topic_name)
 
     @pyqtSlot()
     def _on_topic_return_pressed(self) -> None:
-        self._commit_topic_name(self._topic_combo.currentText())
+        self._commit_topic(self._topic_combo.currentText())
 
-    def _commit_topic_name(self, topic_name: str) -> None:
+    def _commit_topic(self, topic_name: str) -> None:
         try:
-            self._config_manager.set_topic_name(topic_name)
-            self._committed_topic_name = self._config_manager.get_topic_name()
+            self._api.set_topic(topic_name)
+            self._committed_topic = self._api.get_topic()
         except ValueError:
-            self._restore_committed_topic()
-
-    def _restore_committed_topic(self) -> None:
-        self._topic_combo.blockSignals(True)
-        self._topic_combo.setCurrentText(self._committed_topic_name)
-        self._topic_combo.blockSignals(False)
+            with blocked(self._topic_combo):
+                self._topic_combo.setCurrentText(self._committed_topic)
 
     @pyqtSlot(int)
     def _on_rate_changed(self, value: int) -> None:
         try:
-            self._config_manager.set_publish_rate(float(value))
+            self._api.set_rate_hz(float(value))
             self._rate_label.setText(f"{value} Hz")
         except ValueError:
-            pass
-
-    @pyqtSlot(bool)
-    def _on_publish_enabled_changed(self, enabled: bool) -> None:
-        self._publish_toggle.blockSignals(True)
-        self._publish_toggle.setChecked(enabled)
-        self._publish_toggle.blockSignals(False)
-
-    @pyqtSlot(str)
-    def _on_topic_changed(self, topic_name: str) -> None:
-        self._committed_topic_name = topic_name
-        self._topic_combo.blockSignals(True)
-        self._topic_combo.setCurrentText(topic_name)
-        self._topic_combo.blockSignals(False)
-
-    @pyqtSlot(float)
-    def _on_rate_updated(self, value: float) -> None:
-        rate = int(value)
-        self._rate_slider.blockSignals(True)
-        self._rate_slider.setValue(rate)
-        self._rate_slider.blockSignals(False)
-        self._rate_label.setText(f"{rate} Hz")
+            rate = max(1, int(round(self._api.get_rate_hz())))
+            with blocked(self._rate_slider):
+                self._rate_slider.setValue(rate)
+            self._rate_label.setText(f"{rate} Hz")
 
 
 class TwistOutputPanel(_ControlPanel):
-    """Controls for configuring Twist message publishing."""
-
-    def __init__(self, config_manager: ConfigurationManager, parent: Optional[QWidget] = None):
-        super().__init__("Twist Output", config_manager, parent)
-        self._committed_topic_name = self._config_manager.get_twist_topic()
+    def __init__(self, api: TwistOutputAPI, parent: Optional[QWidget] = None):
+        super().__init__("Twist Output", parent)
+        self._api = api
+        self._committed_topic = self._api.get_topic()
         self._build_ui()
-        self._connect_signals()
-        self.refresh_from_config()
+        self._wire()
+        self.refresh()
 
-    def refresh_from_config(self) -> None:
-        self._committed_topic_name = self._config_manager.get_twist_topic()
+    def refresh(self) -> None:
+        self._committed_topic = self._api.get_topic()
+        with blocked(self._twist_topic_combo):
+            self._twist_topic_combo.setCurrentText(self._committed_topic)
 
-        self._twist_topic_combo.blockSignals(True)
-        self._twist_topic_combo.setCurrentText(self._committed_topic_name)
-        self._twist_topic_combo.blockSignals(False)
+        enabled = self._api.get_enabled()
+        with blocked(self._twist_publish_toggle):
+            self._twist_publish_toggle.setChecked(enabled)
 
-        enabled = self._config_manager.is_twist_publish_enabled()
-        self._twist_publish_toggle.blockSignals(True)
-        self._twist_publish_toggle.setChecked(enabled)
-        self._twist_publish_toggle.blockSignals(False)
+        use_stamped = self._api.get_use_stamped()
+        with blocked(self._twist_stamped_checkbox):
+            self._twist_stamped_checkbox.setChecked(use_stamped)
 
-        use_stamped = self._config_manager.is_twist_use_stamped_enabled()
-        self._twist_stamped_checkbox.blockSignals(True)
-        self._twist_stamped_checkbox.setChecked(use_stamped)
-        self._twist_stamped_checkbox.blockSignals(False)
-
-        rate = int(self._config_manager.get_twist_publish_rate())
-        self._twist_rate_slider.blockSignals(True)
-        self._twist_rate_slider.setValue(rate)
-        self._twist_rate_slider.blockSignals(False)
+        rate = max(0, int(round(self._api.get_rate_hz())))
+        with blocked(self._twist_rate_slider):
+            self._twist_rate_slider.setValue(rate)
         self._twist_rate_label.setText(f"{rate} Hz")
 
-        linear_scale, angular_scale = self._config_manager.get_twist_scales()
-        self._twist_linear_spin.blockSignals(True)
-        self._twist_linear_spin.setValue(linear_scale)
-        self._twist_linear_spin.blockSignals(False)
-        self._twist_angular_spin.blockSignals(True)
-        self._twist_angular_spin.setValue(angular_scale)
-        self._twist_angular_spin.blockSignals(False)
+        linear, angular = self._api.get_scales()
+        with blocked(self._twist_linear_spin):
+            self._twist_linear_spin.setValue(linear)
+        with blocked(self._twist_angular_spin):
+            self._twist_angular_spin.setValue(angular)
 
-        holonomic = self._config_manager.is_twist_holonomic_enabled()
-        self._twist_holonomic_checkbox.blockSignals(True)
-        self._twist_holonomic_checkbox.setChecked(holonomic)
-        self._twist_holonomic_checkbox.blockSignals(False)
+        holonomic = self._api.get_holonomic()
+        with blocked(self._twist_holonomic_checkbox):
+            self._twist_holonomic_checkbox.setChecked(holonomic)
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
@@ -364,16 +388,14 @@ class TwistOutputPanel(_ControlPanel):
         layout.addWidget(self._label("Topic:"), row, 0)
         self._twist_topic_combo = QComboBox()
         self._twist_topic_combo.setEditable(True)
-        self._twist_topic_combo.addItems(["cmd_vel", "virtualjoy/cmd_vel"])
-        self._twist_topic_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._twist_topic_combo.addItems(["cmd_vel", "robot/cmd_vel", "teleop/cmd_vel"])
         layout.addWidget(self._twist_topic_combo, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
 
         row += 1
         layout.addWidget(self._label("Rate:"), row, 0)
         self._twist_rate_slider = QSlider(Qt.Horizontal)
-        self._twist_rate_slider.setRange(1, 100)
-        self._twist_rate_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._twist_rate_slider.setRange(0, 100)
         layout.addWidget(self._twist_rate_slider, row, 1)
         self._twist_rate_label = self._value_label()
         layout.addWidget(self._twist_rate_label, row, 2)
@@ -381,8 +403,8 @@ class TwistOutputPanel(_ControlPanel):
         row += 1
         layout.addWidget(self._label("Linear Scale:"), row, 0)
         self._twist_linear_spin = QDoubleSpinBox()
-        self._twist_linear_spin.setDecimals(2)
-        self._twist_linear_spin.setRange(0.0, 5.0)
+        self._twist_linear_spin.setRange(0.0, 10.0)
+        self._twist_linear_spin.setDecimals(3)
         self._twist_linear_spin.setSingleStep(0.1)
         layout.addWidget(self._twist_linear_spin, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
@@ -390,163 +412,110 @@ class TwistOutputPanel(_ControlPanel):
         row += 1
         layout.addWidget(self._label("Angular Scale:"), row, 0)
         self._twist_angular_spin = QDoubleSpinBox()
-        self._twist_angular_spin.setDecimals(2)
-        self._twist_angular_spin.setRange(0.0, 5.0)
+        self._twist_angular_spin.setRange(0.0, 10.0)
+        self._twist_angular_spin.setDecimals(3)
         self._twist_angular_spin.setSingleStep(0.1)
         layout.addWidget(self._twist_angular_spin, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
 
         row += 1
-        layout.addWidget(self._label("Holonomic:"), row, 0)
         holonomic_container = QWidget()
         holonomic_layout = QHBoxLayout()
         holonomic_layout.setContentsMargins(0, 0, 0, 0)
-        holonomic_layout.setSpacing(6)
+        holonomic_layout.setSpacing(4)
+        holonomic_layout.addWidget(self._label("Holonomic:"))
         self._twist_holonomic_checkbox = QCheckBox()
         holonomic_layout.addWidget(self._twist_holonomic_checkbox)
-        self._twist_holonomic_hint = QLabel("Hold Shift to temporarily enable")
-        self._twist_holonomic_hint.setStyleSheet("color: #a0a0a0; font-size: 11px;")
-        holonomic_layout.addWidget(self._twist_holonomic_hint)
+        hint = QLabel("Hold Shift to temporarily enable")
+        hint.setStyleSheet("color: #a0a0a0; font-size: 11px;")
+        holonomic_layout.addWidget(hint)
         holonomic_layout.addStretch(1)
         holonomic_container.setLayout(holonomic_layout)
-        layout.addWidget(holonomic_container, row, 1, 1, 2)
+        layout.addWidget(holonomic_container, row, 0, 1, 3)
 
         self._body_layout.addLayout(layout)
 
-    def _connect_signals(self) -> None:
-        self._twist_publish_toggle.toggled.connect(self._config_manager.set_twist_publish_enabled)
-        self._twist_stamped_checkbox.toggled.connect(self._config_manager.set_twist_use_stamped)
+    def _wire(self) -> None:
+        self._twist_publish_toggle.toggled.connect(self._api.set_enabled)
+        self._twist_stamped_checkbox.toggled.connect(self._api.set_use_stamped)
         self._twist_topic_combo.activated[str].connect(self._on_topic_activated)
         topic_line_edit = self._twist_topic_combo.lineEdit()
         if topic_line_edit:
             topic_line_edit.returnPressed.connect(self._on_topic_return_pressed)
-
         self._twist_rate_slider.valueChanged.connect(self._on_rate_changed)
-        self._twist_linear_spin.valueChanged.connect(self._on_scale_changed)
-        self._twist_angular_spin.valueChanged.connect(self._on_scale_changed)
-        self._twist_holonomic_checkbox.toggled.connect(self._config_manager.set_twist_holonomic)
-
-        self._config_manager.twist_publish_enabled_changed.connect(self._on_enabled_changed)
-        self._config_manager.twist_use_stamped_changed.connect(self._on_use_stamped_changed)
-        self._config_manager.twist_topic_changed.connect(self._on_topic_changed)
-        self._config_manager.twist_rate_changed.connect(self._on_rate_updated)
-        self._config_manager.twist_scales_changed.connect(self._on_scales_updated)
-        self._config_manager.twist_holonomic_changed.connect(self._on_holonomic_changed)
+        self._twist_linear_spin.valueChanged.connect(self._on_linear_changed)
+        self._twist_angular_spin.valueChanged.connect(self._on_angular_changed)
+        self._twist_holonomic_checkbox.toggled.connect(self._api.set_holonomic)
 
     @pyqtSlot(str)
-    def _on_topic_activated(self, topic_name: str) -> None:
-        self._commit_topic_name(topic_name)
+    def _on_topic_activated(self, topic: str) -> None:
+        self._commit_topic(topic)
 
     @pyqtSlot()
     def _on_topic_return_pressed(self) -> None:
-        self._commit_topic_name(self._twist_topic_combo.currentText())
+        self._commit_topic(self._twist_topic_combo.currentText())
 
-    def _commit_topic_name(self, topic_name: str) -> None:
+    def _commit_topic(self, topic: str) -> None:
         try:
-            self._config_manager.set_twist_topic(topic_name)
-            self._committed_topic_name = self._config_manager.get_twist_topic()
+            self._api.set_topic(topic)
+            self._committed_topic = self._api.get_topic()
         except ValueError:
-            self._restore_committed_topic()
-
-    def _restore_committed_topic(self) -> None:
-        self._twist_topic_combo.blockSignals(True)
-        self._twist_topic_combo.setCurrentText(self._committed_topic_name)
-        self._twist_topic_combo.blockSignals(False)
+            with blocked(self._twist_topic_combo):
+                self._twist_topic_combo.setCurrentText(self._committed_topic)
 
     @pyqtSlot(int)
     def _on_rate_changed(self, value: int) -> None:
         try:
-            self._config_manager.set_twist_publish_rate(float(value))
+            self._api.set_rate_hz(float(value))
             self._twist_rate_label.setText(f"{value} Hz")
         except ValueError:
-            pass
+            rate = max(0, int(round(self._api.get_rate_hz())))
+            with blocked(self._twist_rate_slider):
+                self._twist_rate_slider.setValue(rate)
+            self._twist_rate_label.setText(f"{rate} Hz")
 
     @pyqtSlot(float)
-    def _on_scale_changed(self, _value: float) -> None:
+    def _on_linear_changed(self, value: float) -> None:
         try:
-            self._config_manager.set_twist_scales(
-                self._twist_linear_spin.value(),
-                self._twist_angular_spin.value(),
-            )
+            _, angular = self._api.get_scales()
+            self._api.set_scales(value, angular)
         except ValueError:
-            pass
-
-    @pyqtSlot(bool)
-    def _on_enabled_changed(self, enabled: bool) -> None:
-        self._twist_publish_toggle.blockSignals(True)
-        self._twist_publish_toggle.setChecked(enabled)
-        self._twist_publish_toggle.blockSignals(False)
-
-    @pyqtSlot(bool)
-    def _on_use_stamped_changed(self, enabled: bool) -> None:
-        self._twist_stamped_checkbox.blockSignals(True)
-        self._twist_stamped_checkbox.setChecked(enabled)
-        self._twist_stamped_checkbox.blockSignals(False)
-
-    @pyqtSlot(str)
-    def _on_topic_changed(self, topic_name: str) -> None:
-        self._committed_topic_name = topic_name
-        self._twist_topic_combo.blockSignals(True)
-        self._twist_topic_combo.setCurrentText(topic_name)
-        self._twist_topic_combo.blockSignals(False)
+            with blocked(self._twist_linear_spin):
+                self._twist_linear_spin.setValue(self._api.get_scales()[0])
 
     @pyqtSlot(float)
-    def _on_rate_updated(self, value: float) -> None:
-        rate = int(value)
-        self._twist_rate_slider.blockSignals(True)
-        self._twist_rate_slider.setValue(rate)
-        self._twist_rate_slider.blockSignals(False)
-        self._twist_rate_label.setText(f"{rate} Hz")
-
-    @pyqtSlot()
-    def _on_scales_updated(self) -> None:
-        linear_scale, angular_scale = self._config_manager.get_twist_scales()
-        self._twist_linear_spin.blockSignals(True)
-        self._twist_linear_spin.setValue(linear_scale)
-        self._twist_linear_spin.blockSignals(False)
-        self._twist_angular_spin.blockSignals(True)
-        self._twist_angular_spin.setValue(angular_scale)
-        self._twist_angular_spin.blockSignals(False)
-
-    @pyqtSlot(bool)
-    def _on_holonomic_changed(self, enabled: bool) -> None:
-        self._twist_holonomic_checkbox.blockSignals(True)
-        self._twist_holonomic_checkbox.setChecked(enabled)
-        self._twist_holonomic_checkbox.blockSignals(False)
+    def _on_angular_changed(self, value: float) -> None:
+        try:
+            linear, _ = self._api.get_scales()
+            self._api.set_scales(linear, value)
+        except ValueError:
+            with blocked(self._twist_angular_spin):
+                self._twist_angular_spin.setValue(self._api.get_scales()[1])
 
 
 class JoystickConfigPanel(_ControlPanel):
-    """Controls for tuning joystick behaviour (dead zone, expo, return mode)."""
-
-    def __init__(self, config_manager: ConfigurationManager, parent: Optional[QWidget] = None):
-        super().__init__("Joystick Config", config_manager, parent)
+    def __init__(self, api: JoystickConfigAPI, parent: Optional[QWidget] = None):
+        super().__init__("Joystick", parent)
+        self._api = api
         self._build_ui()
-        self._connect_signals()
-        self.refresh_from_config()
+        self._wire()
+        self.refresh()
 
-    def refresh_from_config(self) -> None:
-        dead_zone = int(self._config_manager.get_dead_zone() * 100)
-        dead_zone_x = int(self._config_manager.get_dead_zone_x() * 100)
-        dead_zone_y = int(self._config_manager.get_dead_zone_y() * 100)
-        expo_x = int(self._config_manager.get_expo_x())
-        expo_y = int(self._config_manager.get_expo_y())
-        return_mode = self._config_manager.get_return_mode()
-        sticky_enabled = self._config_manager.is_sticky_buttons_enabled()
+    def refresh(self) -> None:
+        self._dead_zone_row.set(int(round(self._api.get_dead_zone() * 100)))
+        self._dead_zone_x_row.set(int(round(self._api.get_dead_zone_x() * 100)))
+        self._dead_zone_y_row.set(int(round(self._api.get_dead_zone_y() * 100)))
+        self._expo_x_row.set(int(round(self._api.get_expo_x())))
+        self._expo_y_row.set(int(round(self._api.get_expo_y())))
 
-        self._set_slider_value(self._dead_zone_slider, self._dead_zone_label, dead_zone)
-        self._set_slider_value(self._dead_zone_x_slider, self._dead_zone_x_label, dead_zone_x)
-        self._set_slider_value(self._dead_zone_y_slider, self._dead_zone_y_label, dead_zone_y)
-        self._set_slider_value(self._expo_x_slider, self._expo_x_label, expo_x, suffix=" %")
-        self._set_slider_value(self._expo_y_slider, self._expo_y_label, expo_y, suffix=" %")
+        mode = self._api.get_return_mode()
+        index = max(0, self._return_mode_combo.findData(mode))
+        with blocked(self._return_mode_combo):
+            self._return_mode_combo.setCurrentIndex(index)
 
-        index = max(0, self._return_mode_combo.findData(return_mode))
-        self._return_mode_combo.blockSignals(True)
-        self._return_mode_combo.setCurrentIndex(index)
-        self._return_mode_combo.blockSignals(False)
-
-        self._sticky_buttons_checkbox.blockSignals(True)
-        self._sticky_buttons_checkbox.setChecked(sticky_enabled)
-        self._sticky_buttons_checkbox.blockSignals(False)
+        sticky = self._api.get_sticky_buttons()
+        with blocked(self._sticky_buttons_checkbox):
+            self._sticky_buttons_checkbox.setChecked(sticky)
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
@@ -557,37 +526,42 @@ class JoystickConfigPanel(_ControlPanel):
         layout.setColumnStretch(2, 0)
 
         row = 0
-        self._dead_zone_slider = self._create_slider(0, 90)
-        self._dead_zone_label = self._value_label()
-        self._add_slider_row(layout, row, "Dead Zone:", self._dead_zone_slider, self._dead_zone_label)
+        layout.addWidget(self._label("Dead Zone:"), row, 0)
+        self._dead_zone_row = SliderRow(self, 0, 90, suffix=" %")
+        layout.addWidget(self._dead_zone_row.slider(), row, 1)
+        layout.addWidget(self._dead_zone_row.label(), row, 2)
 
         row += 1
-        self._dead_zone_x_slider = self._create_slider(0, 90)
-        self._dead_zone_x_label = self._value_label()
-        self._add_slider_row(layout, row, "Dead Zone X:", self._dead_zone_x_slider, self._dead_zone_x_label)
+        layout.addWidget(self._label("Dead Zone X:"), row, 0)
+        self._dead_zone_x_row = SliderRow(self, 0, 90, suffix=" %")
+        layout.addWidget(self._dead_zone_x_row.slider(), row, 1)
+        layout.addWidget(self._dead_zone_x_row.label(), row, 2)
 
         row += 1
-        self._dead_zone_y_slider = self._create_slider(0, 90)
-        self._dead_zone_y_label = self._value_label()
-        self._add_slider_row(layout, row, "Dead Zone Y:", self._dead_zone_y_slider, self._dead_zone_y_label)
+        layout.addWidget(self._label("Dead Zone Y:"), row, 0)
+        self._dead_zone_y_row = SliderRow(self, 0, 90, suffix=" %")
+        layout.addWidget(self._dead_zone_y_row.slider(), row, 1)
+        layout.addWidget(self._dead_zone_y_row.label(), row, 2)
 
         row += 1
-        self._expo_x_slider = self._create_slider(0, 100)
-        self._expo_x_label = self._value_label()
-        self._add_slider_row(layout, row, "Expo X:", self._expo_x_slider, self._expo_x_label)
+        layout.addWidget(self._label("Expo X:"), row, 0)
+        self._expo_x_row = SliderRow(self, 0, 100, suffix=" %")
+        layout.addWidget(self._expo_x_row.slider(), row, 1)
+        layout.addWidget(self._expo_x_row.label(), row, 2)
 
         row += 1
-        self._expo_y_slider = self._create_slider(0, 100)
-        self._expo_y_label = self._value_label()
-        self._add_slider_row(layout, row, "Expo Y:", self._expo_y_slider, self._expo_y_label)
+        layout.addWidget(self._label("Expo Y:"), row, 0)
+        self._expo_y_row = SliderRow(self, 0, 100, suffix=" %")
+        layout.addWidget(self._expo_y_row.slider(), row, 1)
+        layout.addWidget(self._expo_y_row.label(), row, 2)
 
         row += 1
         layout.addWidget(self._label("Auto Return:"), row, 0)
         self._return_mode_combo = QComboBox()
-        self._return_mode_combo.addItem("Both Axes", RETURN_MODE_BOTH)
-        self._return_mode_combo.addItem("X Only", RETURN_MODE_HORIZONTAL)
-        self._return_mode_combo.addItem("Y Only", RETURN_MODE_VERTICAL)
-        self._return_mode_combo.addItem("Disabled", RETURN_MODE_NONE)
+        self._return_mode_combo.addItem("Both Axes", ReturnMode.BOTH)
+        self._return_mode_combo.addItem("X Only", ReturnMode.HORIZONTAL)
+        self._return_mode_combo.addItem("Y Only", ReturnMode.VERTICAL)
+        self._return_mode_combo.addItem("Disabled", ReturnMode.NONE)
         layout.addWidget(self._return_mode_combo, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
 
@@ -599,94 +573,53 @@ class JoystickConfigPanel(_ControlPanel):
 
         self._body_layout.addLayout(layout)
 
-    def _connect_signals(self) -> None:
-        self._dead_zone_slider.valueChanged.connect(self._on_dead_zone_changed)
-        self._dead_zone_x_slider.valueChanged.connect(self._on_dead_zone_x_changed)
-        self._dead_zone_y_slider.valueChanged.connect(self._on_dead_zone_y_changed)
-        self._expo_x_slider.valueChanged.connect(self._on_expo_x_changed)
-        self._expo_y_slider.valueChanged.connect(self._on_expo_y_changed)
+    def _wire(self) -> None:
+        self._dead_zone_row.slider().valueChanged.connect(self._on_dead_zone_changed)
+        self._dead_zone_x_row.slider().valueChanged.connect(self._on_dead_zone_x_changed)
+        self._dead_zone_y_row.slider().valueChanged.connect(self._on_dead_zone_y_changed)
+        self._expo_x_row.slider().valueChanged.connect(self._on_expo_x_changed)
+        self._expo_y_row.slider().valueChanged.connect(self._on_expo_y_changed)
         self._return_mode_combo.currentIndexChanged.connect(self._on_return_mode_changed)
-        self._sticky_buttons_checkbox.toggled.connect(self._config_manager.set_sticky_buttons)
-
-        self._config_manager.dead_zone_changed.connect(self.refresh_from_config)
-        self._config_manager.expo_changed.connect(self.refresh_from_config)
-        self._config_manager.return_mode_changed.connect(self._on_return_mode_updated)
-        self._config_manager.sticky_buttons_changed.connect(self._on_sticky_buttons_changed)
-
-    def _create_slider(self, minimum: int, maximum: int) -> QSlider:
-        slider = QSlider(Qt.Horizontal)
-        slider.setRange(minimum, maximum)
-        slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        return slider
-
-    def _add_slider_row(self, layout: QGridLayout, row: int, text: str, slider: QSlider, value_label: QLabel) -> None:
-        layout.addWidget(self._label(text), row, 0)
-        layout.addWidget(slider, row, 1)
-        layout.addWidget(value_label, row, 2)
-
-    def _set_slider_value(self, slider: QSlider, value_label: QLabel, value: int, suffix: str = " %") -> None:
-        slider.blockSignals(True)
-        slider.setValue(value)
-        slider.blockSignals(False)
-        value_label.setText(f"{value}{suffix}")
+        self._sticky_buttons_checkbox.toggled.connect(self._on_sticky_buttons_changed)
 
     @pyqtSlot(int)
     def _on_dead_zone_changed(self, value: int) -> None:
-        try:
-            self._config_manager.set_dead_zone(value / 100.0)
-            self._dead_zone_label.setText(f"{value} %")
-        except ValueError:
-            pass
+        self._api.set_dead_zone(value / 100.0)
+        self._dead_zone_row.label().setText(f"{value} %")
 
     @pyqtSlot(int)
     def _on_dead_zone_x_changed(self, value: int) -> None:
-        try:
-            self._config_manager.set_dead_zone_x(value / 100.0)
-            self._dead_zone_x_label.setText(f"{value} %")
-        except ValueError:
-            pass
+        self._api.set_dead_zone_x(value / 100.0)
+        self._dead_zone_x_row.label().setText(f"{value} %")
 
     @pyqtSlot(int)
     def _on_dead_zone_y_changed(self, value: int) -> None:
-        try:
-            self._config_manager.set_dead_zone_y(value / 100.0)
-            self._dead_zone_y_label.setText(f"{value} %")
-        except ValueError:
-            pass
+        self._api.set_dead_zone_y(value / 100.0)
+        self._dead_zone_y_row.label().setText(f"{value} %")
 
     @pyqtSlot(int)
     def _on_expo_x_changed(self, value: int) -> None:
-        try:
-            self._config_manager.set_expo_x(float(value))
-            self._expo_x_label.setText(f"{value} %")
-        except ValueError:
-            pass
+        self._api.set_expo_x(float(value))
+        self._expo_x_row.label().setText(f"{value} %")
 
     @pyqtSlot(int)
     def _on_expo_y_changed(self, value: int) -> None:
-        try:
-            self._config_manager.set_expo_y(float(value))
-            self._expo_y_label.setText(f"{value} %")
-        except ValueError:
-            pass
+        self._api.set_expo_y(float(value))
+        self._expo_y_row.label().setText(f"{value} %")
 
     @pyqtSlot(int)
     def _on_return_mode_changed(self, index: int) -> None:
         mode = self._return_mode_combo.itemData(index)
-        try:
-            self._config_manager.set_return_mode(mode)
-        except ValueError:
-            self._on_return_mode_updated(self._config_manager.get_return_mode())
-
-    @pyqtSlot(str)
-    def _on_return_mode_updated(self, mode: str) -> None:
-        index = max(0, self._return_mode_combo.findData(mode))
-        self._return_mode_combo.blockSignals(True)
-        self._return_mode_combo.setCurrentIndex(index)
-        self._return_mode_combo.blockSignals(False)
+        if isinstance(mode, ReturnMode):
+            self._api.set_return_mode(mode)
 
     @pyqtSlot(bool)
     def _on_sticky_buttons_changed(self, enabled: bool) -> None:
-        self._sticky_buttons_checkbox.blockSignals(True)
-        self._sticky_buttons_checkbox.setChecked(enabled)
-        self._sticky_buttons_checkbox.blockSignals(False)
+        self._api.set_sticky_buttons(bool(enabled))
+
+
+__all__ = [
+    "JoyOutputPanel",
+    "TwistOutputPanel",
+    "JoystickConfigPanel",
+]
