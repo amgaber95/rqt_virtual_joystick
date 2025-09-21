@@ -1,264 +1,221 @@
-
+from __future__ import annotations
+from dataclasses import dataclass
 from typing import List, Optional
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from python_qt_binding.QtCore import QObject, QTimer, pyqtSignal
 
 from sensor_msgs.msg import Joy
-
-from .config_manager import ConfigurationManager
+from python_qt_binding.QtCore import QObject, QTimer
 
 
 DEFAULT_BUTTON_COUNT = 12
+DEFAULT_AXIS_COUNT = 6
+
+
+@dataclass
+class JoyPublishSettings:
+    topic: str = "joy"
+    rate_hz: float = 20.0
+    enabled: bool = True
+    axis_count: int = DEFAULT_AXIS_COUNT
+    button_count: int = DEFAULT_BUTTON_COUNT
+    qos_reliability: QoSReliabilityPolicy = QoSReliabilityPolicy.RELIABLE
+    qos_history: QoSHistoryPolicy = QoSHistoryPolicy.KEEP_LAST
+    qos_depth: int = 10
 
 
 class JoyPublisherService(QObject):
-    """
-    Service class for publishing Joy messages.
-    It manages topic creation, message publishing, and QoS configuration.
-    
-    Responsibilities:
-    - Create and manage ROS publisher
-    - Build and publish Joy messages
-    - Handle topic changes
-    - Manage publishing timer
-    
-    Signals:
-        publisher_error: Emitted when publisher creation fails
-        message_published: Emitted when a message is successfully published
-    """
-    
-    # Signals
-    publisher_error = pyqtSignal(str)
-    message_published = pyqtSignal()
-    
-    def __init__(self, ros_node: Node, config_manager: ConfigurationManager):
-        """
-        Initialize the Joy publisher service.
-        
-        Args:
-            ros_node: ROS 2 node for creating publishers
-            config_manager: Configuration manager for settings
-        """
+    """Minimal service that publishes sensor_msgs/Joy at a fixed rate."""
+
+    def __init__(self, ros_node: Node, settings: Optional[JoyPublishSettings] = None) -> None:
         super().__init__()
-        
         self._node = ros_node
-        self._config_manager = config_manager
+        self._settings = settings or JoyPublishSettings()
+
         self._publisher: Optional[rclpy.publisher.Publisher] = None
-        self._enabled = self._config_manager.is_publish_enabled()
-        
-        # Current joystick state
-        self._current_axes = [0.0] * 6  # 6 standard axes
-        self._current_buttons: List[int] = [0] * DEFAULT_BUTTON_COUNT
-        
-        # Publishing timer
-        self._publish_timer = QTimer(self)
-        self._publish_timer.timeout.connect(self._publish_joy_message)
-        
-        # Connect to configuration changes
-        self._connect_config_signals()
-        
-        # Initialize publisher with current configuration
-        self._create_publisher()
-        self._update_timer_rate()
-        
-    def _connect_config_signals(self):
-        """Connect to configuration manager signals."""
-        self._config_manager.topic_changed.connect(self._on_topic_changed)
-        self._config_manager.rate_changed.connect(self._on_rate_changed)
-        self._config_manager.publish_enabled_changed.connect(self._on_enabled_changed)
-        
-    def _dispose_publisher(self, publisher: Optional[rclpy.publisher.Publisher]) -> None:
-        """Destroy a ROS publisher while swallowing cleanup errors."""
-        if publisher is None:
+
+        # Current state buffers
+        self._axes: List[float] = [0.0] * max(1, int(self._settings.axis_count))
+        self._buttons: List[int] = [0] * max(1, int(self._settings.button_count))
+
+        # Timer for periodic publishing
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._on_timeout)
+
+        # Init publisher & rate
+        self._create_or_recreate_publisher(force=True)
+        self._apply_rate()
+
+        if self._settings.enabled:
+            self._timer.start()
+
+    # ---------------- Public control API ----------------
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._settings.enabled = bool(enabled)
+        if not self._settings.enabled:
+            self._timer.stop()
+        else:
+            self._on_timeout()  # publish once immediately
+            self._timer.start()
+
+    def is_enabled(self) -> bool:
+        return self._settings.enabled
+
+    def get_enabled(self) -> bool:
+        """Protocol-compatible alias for is_enabled()."""
+        return self.is_enabled()
+
+    def set_topic(self, topic: str) -> None:
+        topic = (topic or "").strip()
+        if not topic:
+            self._node.get_logger().warn("Ignoring empty Joy topic")
             return
-
-        try:
-            self._node.destroy_publisher(publisher)
-        except Exception as exc:
-            self._node.get_logger().warn(
-                f"Failed to destroy Joy publisher instance: {exc}"
-            )
-
-    def _create_publisher(self) -> bool:
-        """
-        Create or recreate the ROS publisher.
-
-        Returns:
-            True if publisher was created successfully, False otherwise
-        """
-        # Get current topic name
-        topic_name = self._config_manager.get_topic_name()
-
-        # Create QoS profile for reliable delivery
-        qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.RELIABLE,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1
-        )
-
-        try:
-            new_publisher = self._node.create_publisher(
-                Joy,
-                topic_name,
-                qos_profile
-            )
-        except Exception as exc:
-            error_msg = f"Failed to create publisher for topic '{topic_name}': {exc}"
-            self._node.get_logger().error(error_msg)
-            self.publisher_error.emit(error_msg)
-            return False
-
-        old_publisher = self._publisher
-        self._publisher = new_publisher
-        self._node.get_logger().info(f"Created Joy publisher for topic: {topic_name}")
-
-        if old_publisher is not None and old_publisher is not new_publisher:
-            self._dispose_publisher(old_publisher)
-
-        return True
-            
-    def _update_timer_rate(self):
-        """Update the publishing timer rate based on configuration."""
-        rate_hz = self._config_manager.get_publish_rate()
-        interval_ms = int(1000.0 / rate_hz)
-
-        if self._publish_timer.isActive():
-            self._publish_timer.stop()
-
-        self._publish_timer.setInterval(interval_ms)
-
-        # Restart timer to ensure continuous publishing at the configured rate
-        if self._publisher and self._enabled:
-            self._publish_timer.start()
-        
-    def _publish_joy_message(self):
-        """Publish the current joystick state as a Joy message."""
-        if not self._publisher or not self._enabled:
+        if topic == self._settings.topic:
             return
-            
-        try:
-            # Create Joy message
-            joy_msg = Joy()
-            joy_msg.header.stamp = self._node.get_clock().now().to_msg()
-            joy_msg.header.frame_id = ""  # No frame needed for virtual joystick
-            
-            # Set axes (copy to avoid reference issues)
-            joy_msg.axes = list(self._current_axes)
-            
-            # Set buttons (copy to avoid reference issues)
-            joy_msg.buttons = list(self._current_buttons)
-            
-            # Publish message
-            self._publisher.publish(joy_msg)
-            self.message_published.emit()
-            
-        except Exception as e:
-            error_msg = f"Failed to publish Joy message: {str(e)}"
-            self._node.get_logger().error(error_msg)
-            self.publisher_error.emit(error_msg)
-            
-    def update_axes(self, x: float, y: float, additional_axes: Optional[List[float]] = None):
-        """
-        Update joystick axes values.
-        
-        Args:
-            x: X-axis value (-1.0 to 1.0)
-            y: Y-axis value (-1.0 to 1.0)  
-            additional_axes: Additional axis values for complex joysticks
-        """
-        # Update primary axes
-        self._current_axes[0] = max(-1.0, min(1.0, x))
-        self._current_axes[1] = max(-1.0, min(1.0, y))
-        
-        # Update additional axes if provided
+        self._settings.topic = topic
+        self._create_or_recreate_publisher()
+
+    def get_topic(self) -> str:
+        return self._settings.topic
+
+    def set_rate_hz(self, rate_hz: float) -> None:
+        self._settings.rate_hz = max(1.0, float(rate_hz))
+        self._apply_rate()
+
+    def get_rate_hz(self) -> float:
+        return self._settings.rate_hz
+
+    def set_qos(self,
+                reliability: QoSReliabilityPolicy,
+                history: QoSHistoryPolicy,
+                depth: int) -> None:
+        self._settings.qos_reliability = reliability
+        self._settings.qos_history = history
+        self._settings.qos_depth = int(max(1, depth))
+        self._create_or_recreate_publisher()
+
+    def set_sizes(self, axis_count: int, button_count: int) -> None:
+        """Resize internal buffers (keeps current values where possible)."""
+        axis_count = max(1, int(axis_count))
+        button_count = max(1, int(button_count))
+
+        if axis_count != len(self._axes):
+            old = self._axes
+            self._axes = (old[:axis_count] + [0.0] * max(0, axis_count - len(old)))[:axis_count]
+
+        if button_count != len(self._buttons):
+            old = self._buttons
+            self._buttons = (old[:button_count] + [0] * max(0, button_count - len(old)))[:button_count]
+
+        self._settings.axis_count = axis_count
+        self._settings.button_count = button_count
+
+    # ---------------- State updates ----------------
+
+    def update_axes(self, x: float, y: float, additional_axes: Optional[List[float]] = None) -> None:
+        """Update axes 0 and 1 (normalized [-1, 1]) and optionally more axes."""
+        if len(self._axes) >= 1:
+            self._axes[0] = max(-1.0, min(1.0, float(x)))
+        if len(self._axes) >= 2:
+            self._axes[1] = max(-1.0, min(1.0, float(y)))
+
         if additional_axes:
-            for i, value in enumerate(additional_axes):
-                if i + 2 < len(self._current_axes):
-                    self._current_axes[i + 2] = max(-1.0, min(1.0, value))
-                    
-        # Start publishing if not already active
-        if self._enabled and not self._publish_timer.isActive() and self._publisher:
-            self._publish_timer.start()
-            
-    def update_button(self, button_index: int, pressed: bool):
-        """
-        Update a specific button state.
-        
-        Args:
-            button_index: Index of the button (0-based)
-            pressed: True if button is pressed, False if released
-        """
+            for i, v in enumerate(additional_axes, start=2):
+                if i < len(self._axes):
+                    self._axes[i] = max(-1.0, min(1.0, float(v)))
+                else:
+                    break
+
+        if self._settings.enabled and self._publisher and not self._timer.isActive():
+            self._timer.start()
+
+    def update_button(self, button_index: int, pressed: bool) -> None:
+        """Set one button (expands array as needed if index is beyond current size)."""
         if button_index < 0:
             return
+        if button_index >= len(self._buttons):
+            # Expand to fit; keep zeros for new buttons
+            self._buttons.extend([0] * (button_index + 1 - len(self._buttons)))
+            self._settings.button_count = len(self._buttons)
 
-        if button_index >= len(self._current_buttons):
-            self._current_buttons.extend([0] * (button_index + 1 - len(self._current_buttons)))
+        self._buttons[button_index] = 1 if pressed else 0
 
-        self._current_buttons[button_index] = 1 if pressed else 0
+        if self._settings.enabled and self._publisher and not self._timer.isActive():
+            self._timer.start()
 
-        if self._enabled and not self._publish_timer.isActive() and self._publisher:
-            self._publish_timer.start()
-                
-    def start_publishing(self):
-        """Start continuous publishing."""
-        if self._enabled and self._publisher and not self._publish_timer.isActive():
-            self._publish_timer.start()
-            
-    def stop_publishing(self):
-        """Stop continuous publishing."""
-        if self._publish_timer.isActive():
-            self._publish_timer.stop()
+    # ---------------- Optional external loop control ----------------
+
+    def start(self) -> None:
+        if self._settings.enabled and self._publisher and not self._timer.isActive():
+            self._timer.start()
+
+    def stop(self) -> None:
+        if self._timer.isActive():
+            self._timer.stop()
 
     def is_publishing(self) -> bool:
-        """Check if currently publishing."""
-        return self._publish_timer.isActive()
-        
-    def _on_enabled_changed(self, enabled: bool):
-        self._enabled = enabled
-        if not enabled:
-            if self._publish_timer.isActive():
-                self._publish_timer.stop()
-        else:
-            # Publish current state immediately then resume timer
-            self._publish_joy_message()
-            if self._publisher and not self._publish_timer.isActive():
-                self._publish_timer.start()
+        return self._timer.isActive()
 
-    def get_current_topic(self) -> str:
-        """Get the current topic name."""
-        return self._config_manager.get_topic_name()
-        
-    def get_publish_rate(self) -> float:
-        """Get the current publish rate."""
-        return self._config_manager.get_publish_rate()
-        
-    # Configuration change handlers
-    def _on_topic_changed(self, new_topic: str):
-        """Handle topic name changes."""
-        was_publishing = self._publish_timer.isActive()
-        
-        if was_publishing:
-            self._publish_timer.stop()
-            
-        # Recreate publisher with new topic
-        if self._create_publisher() and was_publishing:
-            self._publish_timer.start()
-            
-    def _on_rate_changed(self, new_rate: float):
-        """Handle publish rate changes."""
-        self._update_timer_rate()
-        
-    def shutdown(self):
-        """Clean shutdown of the publisher service."""
-        # Stop timer
-        if self._publish_timer.isActive():
-            self._publish_timer.stop()
+    def shutdown(self) -> None:
+        self.stop()
+        if self._publisher:
+            try:
+                self._node.destroy_publisher(self._publisher)
+            except Exception as exc:
+                self._node.get_logger().warn(f"Failed to destroy Joy publisher: {exc}")
+        self._publisher = None
+        self._node.get_logger().info("JoyPublisherService shut down")
 
-        # Clean up publisher
-        if self._publisher is not None:
-            self._dispose_publisher(self._publisher)
+    # ---------------- Internals ----------------
+
+    def _apply_rate(self) -> None:
+        interval_ms = int(1000.0 / max(1.0, self._settings.rate_hz))
+        self._timer.setInterval(interval_ms)
+
+    def _qos(self) -> QoSProfile:
+        return QoSProfile(
+            reliability=self._settings.qos_reliability,
+            history=self._settings.qos_history,
+            depth=self._settings.qos_depth,
+        )
+
+    def _create_or_recreate_publisher(self, *, force: bool = False) -> None:
+        """(Re)create publisher when topic or QoS changes."""
+        was_active = self._timer.isActive()
+        if was_active:
+            self._timer.stop()
+
+        # Destroy old publisher
+        if self._publisher:
+            try:
+                self._node.destroy_publisher(self._publisher)
+            except Exception as exc:
+                self._node.get_logger().warn(f"Failed to destroy old Joy publisher: {exc}")
             self._publisher = None
 
-        self._node.get_logger().info("Joy publisher service shut down")
+        # Create new publisher
+        try:
+            self._publisher = self._node.create_publisher(Joy, self._settings.topic, self._qos())
+            self._node.get_logger().info(f"Created Joy publisher on '{self._settings.topic}'")
+        except Exception as exc:
+            self._publisher = None
+            self._node.get_logger().error(f"Failed to create Joy publisher for '{self._settings.topic}': {exc}")
+
+        # Resume timer if needed
+        if was_active and self._settings.enabled and self._publisher:
+            self._timer.start()
+
+    def _on_timeout(self) -> None:
+        if not self._settings.enabled or not self._publisher:
+            return
+        try:
+            msg = Joy()
+            msg.header.stamp = self._node.get_clock().now().to_msg()
+            msg.axes = list(self._axes)
+            msg.buttons = list(self._buttons)
+            self._publisher.publish(msg)
+        except Exception as exc:
+            self._node.get_logger().error(f"Failed to publish Joy: {exc}")
