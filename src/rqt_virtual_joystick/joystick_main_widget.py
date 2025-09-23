@@ -1,228 +1,439 @@
-from weakref import ref
+"""Main widget for the RQt Virtual Joystick plugin."""
 
-import sip
+from __future__ import annotations
 
-from python_qt_binding.QtCore import Qt, pyqtSlot, QEvent, QObject
+from dataclasses import dataclass
+from typing import Optional
+
+from python_qt_binding.QtCore import QObject, Qt, QEvent
 from python_qt_binding.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QApplication,
+    QFrame,
     QHBoxLayout,
     QSizePolicy,
-    QApplication,
+    QVBoxLayout,
+    QWidget,
 )
+from rclpy.node import Node
 
-from .joystick_widget import JoystickWidget
+from .control_panels import JoyOutputPanel, JoystickConfigPanel, TwistOutputPanel
 from .controller_buttons_widget import ControllerButtonsWidget
-from .config_manager import ConfigurationManager
 from .joy_publisher import JoyPublisherService
+from .joystick_widget import JoystickWidget, ReturnMode
 from .twist_publisher import TwistPublisherService
-from .control_panels import JoyOutputPanel, TwistOutputPanel, JoystickConfigPanel
 
 
-class HolonomicKeyHandler(QObject):
-    """Temporary holonomic override driven by Shift key state."""
+def _to_bool(value, default: bool) -> bool:
+    """Coerce a QVariant/QSettings value to bool with fallback."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
 
-    def __init__(self, root_widget: QWidget, config_manager: ConfigurationManager):
-        super().__init__(root_widget)
-        self._root_widget_ref = ref(root_widget)
-        self._config_manager = config_manager
-        self._shift_active = False
-        self._restore_state = self._config_manager.is_twist_holonomic_enabled()
+
+def _to_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return default
+
+
+class _JoyOutputAPIAdapter:
+    """Expose JoyPublisherService via the JoyOutputPanel protocol."""
+
+    def __init__(self, service: JoyPublisherService) -> None:
+        self._service = service
+
+    def get_enabled(self) -> bool:
+        return self._service.is_enabled()
+
+    def set_enabled(self, on: bool) -> None:
+        self._service.set_enabled(on)
+
+    def get_topic(self) -> str:
+        return self._service.get_topic()
+
+    def set_topic(self, name: str) -> None:
+        self._service.set_topic(name)
+
+    def get_rate_hz(self) -> float:
+        return self._service.get_rate_hz()
+
+    def set_rate_hz(self, hz: float) -> None:
+        self._service.set_rate_hz(hz)
+
+
+class _TwistOutputAPIAdapter:
+    """Expose TwistPublisherService via the TwistOutputPanel protocol."""
+
+    def __init__(self, service: TwistPublisherService) -> None:
+        self._service = service
+
+    def get_enabled(self) -> bool:
+        return self._service.is_enabled()
+
+    def set_enabled(self, on: bool) -> None:
+        self._service.set_enabled(on)
+
+    def get_topic(self) -> str:
+        return self._service.get_topic()
+
+    def set_topic(self, name: str) -> None:
+        self._service.set_topic(name)
+
+    def get_rate_hz(self) -> float:
+        return self._service.get_rate_hz()
+
+    def set_rate_hz(self, hz: float) -> None:
+        self._service.set_rate_hz(hz)
+
+    def get_scales(self) -> tuple[float, float]:
+        return self._service.get_scales()
+
+    def set_scales(self, linear: float, angular: float) -> None:
+        self._service.set_scales(linear, angular)
+
+    def get_use_stamped(self) -> bool:
+        return self._service.get_use_stamped()
+
+    def set_use_stamped(self, on: bool) -> None:
+        self._service.set_use_stamped(on)
+
+    def get_holonomic(self) -> bool:
+        return self._service.get_holonomic()
+
+    def set_holonomic(self, on: bool) -> None:
+        self._service.set_holonomic(on)
+
+
+@dataclass(frozen=True)
+class _JoystickSnapshot:
+    dead_zone: float
+    dead_zone_x: float
+    dead_zone_y: float
+    expo_x: float
+    expo_y: float
+    return_mode: ReturnMode
+    sticky: bool
+
+
+class _JoystickConfigAdapter:
+    """Bridge JoystickWidget + buttons to the JoystickConfigPanel protocol."""
+
+    def __init__(self, joystick: JoystickWidget, buttons: ControllerButtonsWidget) -> None:
+        self._joystick = joystick
+        self._buttons = buttons
+        self._sticky = False
+
+    # Dead zones ---------------------------------------------------------------
+    def get_dead_zone(self) -> float:
+        return self._joystick.get_config().dead_zone
+
+    def set_dead_zone(self, v: float) -> None:
+        self._joystick.set_dead_zone(v)
+
+    def get_dead_zone_x(self) -> float:
+        return self._joystick.get_config().dead_zone_x
+
+    def set_dead_zone_x(self, v: float) -> None:
+        self._joystick.set_dead_zone_x(v)
+
+    def get_dead_zone_y(self) -> float:
+        return self._joystick.get_config().dead_zone_y
+
+    def set_dead_zone_y(self, v: float) -> None:
+        self._joystick.set_dead_zone_y(v)
+
+    # Exponential response -----------------------------------------------------
+    def get_expo_x(self) -> float:
+        return self._joystick.get_config().expo_x
+
+    def set_expo_x(self, pct: float) -> None:
+        self._joystick.set_expo_x(pct)
+
+    def get_expo_y(self) -> float:
+        return self._joystick.get_config().expo_y
+
+    def set_expo_y(self, pct: float) -> None:
+        self._joystick.set_expo_y(pct)
+
+    # Return mode & sticky buttons --------------------------------------------
+    def get_return_mode(self) -> ReturnMode:
+        return self._joystick.get_config().return_mode
+
+    def set_return_mode(self, mode: ReturnMode) -> None:
+        self._joystick.set_return_mode(mode)
+
+    def get_sticky_buttons(self) -> bool:
+        return self._sticky
+
+    def set_sticky_buttons(self, on: bool) -> None:
+        self._sticky = bool(on)
+        self._buttons.set_sticky_buttons(self._sticky)
+
+    # Snapshot used for persistence -------------------------------------------
+    def snapshot(self) -> _JoystickSnapshot:
+        cfg = self._joystick.get_config()
+        return _JoystickSnapshot(
+            dead_zone=cfg.dead_zone,
+            dead_zone_x=cfg.dead_zone_x,
+            dead_zone_y=cfg.dead_zone_y,
+            expo_x=cfg.expo_x,
+            expo_y=cfg.expo_y,
+            return_mode=cfg.return_mode,
+            sticky=self._sticky,
+        )
+
+
+class _HolonomicShiftHandler(QObject):
+    """Temporarily force holonomic mode while Shift is held."""
+
+    def __init__(self, twist_service: TwistPublisherService, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._twist_service = twist_service
+        self._last_value = twist_service.get_holonomic()
+        self._active = False
 
         app = QApplication.instance()
-        self._application = app
-        self._installed_filter = False
-        if self._application is not None:
-            self._application.installEventFilter(self)
-            self._installed_filter = True
+        self._app = app
+        if self._app is not None:
+            self._app.installEventFilter(self)
+        parent.destroyed.connect(self._cleanup)
 
-        root_widget.destroyed.connect(self._on_root_destroyed)
-        self._config_manager.twist_holonomic_changed.connect(self._on_holonomic_changed)
+    def eventFilter(self, obj, event):  # noqa: D401 - Qt signature
+        if event.type() in (QEvent.KeyPress, QEvent.KeyRelease):
+            is_shift = False
+            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Shift:
+                is_shift = True
+            elif event.type() == QEvent.KeyRelease and event.key() == Qt.Key_Shift:
+                is_shift = False
+            else:
+                modifiers = event.modifiers() if hasattr(event, "modifiers") else Qt.NoModifier
+                is_shift = bool(modifiers & Qt.ShiftModifier)
 
-    def eventFilter(self, obj, event):
-        root_widget = self._root_widget()
-        if self._is_deleted(root_widget):
-            self._uninstall()
-            return False
-
-        if self._is_deleted(obj):
-            return False
-
-        if not self._is_relevant_object(root_widget, obj):
-            return False
-
-        if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
-            if event.key() == Qt.Key_Shift:
-                self._activate_shift_override()
-        elif event.type() == QEvent.KeyRelease and not event.isAutoRepeat():
-            if event.key() == Qt.Key_Shift:
-                self._deactivate_shift_override()
-
+            if is_shift != self._active:
+                self._toggle(is_shift)
         return False
 
-    def _is_relevant_object(self, root_widget: QWidget, obj) -> bool:
-        if self._is_deleted(root_widget):
-            return False
+    def _toggle(self, enabled: bool) -> None:
+        if enabled:
+            self._last_value = self._twist_service.get_holonomic()
+            self._twist_service.set_holonomic(True)
+        else:
+            self._twist_service.set_holonomic(self._last_value)
+        self._active = enabled
 
-        if not isinstance(obj, QWidget) or self._is_deleted(obj):
-            return False
-        try:
-            return obj is root_widget or root_widget.isAncestorOf(obj)
-        except RuntimeError:
-            return False
-
-    @staticmethod
-    def _is_deleted(qobj) -> bool:
-        if qobj is None:
-            return True
-        try:
-            return sip.isdeleted(qobj)
-        except (RuntimeError, ReferenceError):
-            return True
-        except TypeError:
-            return False
-
-    def _activate_shift_override(self) -> None:
-        if self._shift_active:
-            return
-
-        self._shift_active = True
-        self._restore_state = self._config_manager.is_twist_holonomic_enabled()
-        if not self._restore_state:
-            self._config_manager.set_twist_holonomic(True)
-
-    def _deactivate_shift_override(self) -> None:
-        if not self._shift_active:
-            return
-
-        self._shift_active = False
-        desired_state = self._restore_state
-        if self._config_manager.is_twist_holonomic_enabled() != desired_state:
-            self._config_manager.set_twist_holonomic(desired_state)
-
-    def _on_holonomic_changed(self, enabled: bool) -> None:
-        if not self._shift_active:
-            self._restore_state = enabled
-
-    def _uninstall(self) -> None:
-        if self._installed_filter and self._application is not None:
-            self._application.removeEventFilter(self)
-            self._installed_filter = False
-        self._application = None
-        self._root_widget_ref = None
-        try:
-            self._config_manager.twist_holonomic_changed.disconnect(self._on_holonomic_changed)
-        except TypeError:
-            pass
-
-    def _on_root_destroyed(self, _obj=None):
-        self._uninstall()
-
-    def _root_widget(self):
-        return self._root_widget_ref() if self._root_widget_ref is not None else None
+    def _cleanup(self) -> None:
+        if self._app is not None:
+            self._app.removeEventFilter(self)
+        self._app = None
 
 
 class JoystickMainWidget(QWidget):
-    """Main widget that wires the joystick visualizer with configuration controls."""
+    """Compose joystick controls, publishers, and configuration panels."""
 
-    def __init__(self, ros_node, parent=None):
+    def __init__(self, ros_node: Node, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._node = ros_node
 
-        self._ros_node = ros_node
-        self._config_manager = ConfigurationManager()
-        self._publisher_service = JoyPublisherService(ros_node, self._config_manager)
-        self._twist_publisher_service = TwistPublisherService(ros_node, self._config_manager)
-        self._twist_publisher_service.update_from_axes(0.0, 0.0)
+        self._joy_service = JoyPublisherService(self._node)
+        self._twist_service = TwistPublisherService(self._node)
+        self._joystick = JoystickWidget()
+        self._buttons = ControllerButtonsWidget(sticky_buttons=False)
 
-        self.setMaximumWidth(700)  # Increased to accommodate joystick + buttons
+        self._joy_api = _JoyOutputAPIAdapter(self._joy_service)
+        self._twist_api = _TwistOutputAPIAdapter(self._twist_service)
+        self._config_api = _JoystickConfigAdapter(self._joystick, self._buttons)
 
-        self._init_ui()
+        self._joy_panel = JoyOutputPanel(self._joy_api)
+        self._twist_panel = TwistOutputPanel(self._twist_api)
+        self._joystick_panel = JoystickConfigPanel(self._config_api)
+
+        self._build_ui()
         self._connect_signals()
+
+        self._shift_handler = _HolonomicShiftHandler(self._twist_service, self)
+
+        self.setWindowTitle("Virtual Joystick")
         self.setFocusPolicy(Qt.StrongFocus)
-        self._holonomic_key_handler = HolonomicKeyHandler(self, self._config_manager)
-        self._controller_buttons_widget.set_sticky_buttons(
-            self._config_manager.is_sticky_buttons_enabled()
-        )
+        self.setFocusProxy(self._joystick)
 
-    def _init_ui(self):
-        main_layout = QVBoxLayout()
+    # ------------------------------------------------------------------
+    # UI / wiring
+    # ------------------------------------------------------------------
 
-        # Create horizontal layout for joystick and controller buttons
-        joystick_layout = QHBoxLayout()
+    def _build_ui(self) -> None:
+        top_row = QWidget()
+        top_layout = QHBoxLayout(top_row)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(12)
 
-        self._joystick_widget = JoystickWidget(self._config_manager)
-        joystick_layout.addWidget(self._joystick_widget, 1)
+        self._joystick.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        top_layout.addWidget(self._joystick, 3)
 
-        # Add controller buttons widget
-        self._controller_buttons_widget = ControllerButtonsWidget(
-            sticky_buttons=self._config_manager.is_sticky_buttons_enabled()
-        )
-        joystick_layout.addWidget(self._controller_buttons_widget, 0)
+        self._buttons.setMinimumWidth(220)
+        self._buttons.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        top_layout.addWidget(self._buttons, 1)
 
-        # Add some spacing between joystick and buttons
-        # joystick_layout.setSpacing(0)
+        top_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        main_layout.addLayout(joystick_layout, 1)
-        controls_widget = QWidget()
-        controls_layout = QVBoxLayout()
-        controls_layout.setSpacing(8)
+        panels_frame = QFrame()
+        panels_frame.setFrameShape(QFrame.NoFrame)
+        panels_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        self._publishing_panel = JoyOutputPanel(self._config_manager)
-        self._twist_panel = TwistOutputPanel(self._config_manager)
-        self._joystick_config_panel = JoystickConfigPanel(self._config_manager)
+        panels_layout = QVBoxLayout(panels_frame)
+        panels_layout.setContentsMargins(0, 0, 0, 0)
+        panels_layout.setSpacing(8)
+        panels_layout.addWidget(self._joy_panel)
+        panels_layout.addWidget(self._twist_panel)
+        panels_layout.addWidget(self._joystick_panel)
+        panels_layout.addStretch(1)
 
-        controls_layout.addWidget(self._publishing_panel)
-        controls_layout.addWidget(self._twist_panel)
-        controls_layout.addWidget(self._joystick_config_panel)
-        controls_layout.addStretch(1)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(8, 8, 8, 8)
+        root_layout.setSpacing(12)
+        root_layout.addWidget(top_row)
+        root_layout.addWidget(panels_frame)
+        root_layout.setStretchFactor(top_row, 0)
+        root_layout.setStretchFactor(panels_frame, 1)
 
-        controls_widget.setLayout(controls_layout)
-        controls_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    def _connect_signals(self) -> None:
+        self._joystick.position_changed.connect(self._on_joystick_position)
+        self._buttons.button_toggled.connect(self._joy_service.update_button)
 
-        main_layout.addWidget(controls_widget, 0)
-        main_layout.addStretch(1)
+    def _on_joystick_position(self, x: float, y: float) -> None:
+        self._joy_service.update_axes(x, y)
+        self._twist_service.update_from_axes(x, y)
 
-        self.setLayout(main_layout)
+    # ------------------------------------------------------------------
+    # Settings persistence
+    # ------------------------------------------------------------------
 
-    def _connect_signals(self):
-        self._joystick_widget.position_changed.connect(self._on_joystick_moved)
-        self._controller_buttons_widget.button_pressed.connect(self._on_button_pressed)
-        self._publisher_service.publisher_error.connect(self._on_publisher_error)
-        self._twist_publisher_service.publisher_error.connect(self._on_publisher_error)
-        self._config_manager.sticky_buttons_changed.connect(self._on_sticky_buttons_changed)
+    def save_settings(self, settings) -> None:
+        if settings is None:
+            return
 
-    @pyqtSlot(float, float)
-    def _on_joystick_moved(self, x: float, y: float):
-        self._publisher_service.update_axes(x, y)
-        self._twist_publisher_service.update_from_axes(x, y)
+        settings.set_value("joy/topic", self._joy_service.get_topic())
+        settings.set_value("joy/rate_hz", self._joy_service.get_rate_hz())
+        settings.set_value("joy/enabled", self._joy_service.is_enabled())
 
-    @pyqtSlot(int, bool)
-    def _on_button_pressed(self, button_index: int, pressed: bool):
-        """Handle face button press/release events."""
-        self._publisher_service.update_button(button_index, pressed)
+        settings.set_value("twist/topic", self._twist_service.get_topic())
+        settings.set_value("twist/rate_hz", self._twist_service.get_rate_hz())
+        settings.set_value("twist/enabled", self._twist_service.is_enabled())
+        settings.set_value("twist/use_stamped", self._twist_service.get_use_stamped())
+        settings.set_value("twist/holonomic", self._twist_service.get_holonomic())
+        linear_scale, angular_scale = self._twist_service.get_scales()
+        settings.set_value("twist/linear_scale", linear_scale)
+        settings.set_value("twist/angular_scale", angular_scale)
 
-    @pyqtSlot(str)
-    def _on_publisher_error(self, error_msg: str):
-        self._ros_node.get_logger().error(f"Publisher error: {error_msg}")
+        snapshot = self._config_api.snapshot()
+        settings.set_value("joystick/dead_zone", snapshot.dead_zone)
+        settings.set_value("joystick/dead_zone_x", snapshot.dead_zone_x)
+        settings.set_value("joystick/dead_zone_y", snapshot.dead_zone_y)
+        settings.set_value("joystick/expo_x", snapshot.expo_x)
+        settings.set_value("joystick/expo_y", snapshot.expo_y)
+        settings.set_value("joystick/return_mode", snapshot.return_mode.name)
+        settings.set_value("joystick/sticky_buttons", snapshot.sticky)
 
-    def save_settings(self, settings):
-        self._config_manager.save_settings(settings)
+        settings.set_value("panels/joy_collapsed", self._joy_panel.is_collapsed())
+        settings.set_value("panels/twist_collapsed", self._twist_panel.is_collapsed())
+        settings.set_value("panels/joystick_collapsed", self._joystick_panel.is_collapsed())
 
-    def restore_settings(self, settings):
-        self._config_manager.restore_settings(settings)
-        self._publishing_panel.refresh_from_config()
-        self._twist_panel.refresh_from_config()
-        self._joystick_config_panel.refresh_from_config()
-        self._controller_buttons_widget.set_sticky_buttons(
-            self._config_manager.is_sticky_buttons_enabled()
-        )
+        if hasattr(settings, "sync"):
+            settings.sync()
 
-    def shutdown(self):
-        self._publisher_service.shutdown()
-        self._twist_publisher_service.shutdown()
-        self._joystick_widget.reset_position()
-        self._controller_buttons_widget.reset_buttons()
+    def restore_settings(self, settings) -> None:
+        if settings is None:
+            self._refresh_panels()
+            return
 
-    @pyqtSlot(bool)
-    def _on_sticky_buttons_changed(self, enabled: bool):
-        self._controller_buttons_widget.set_sticky_buttons(enabled)
+        joy_topic = settings.value("joy/topic", self._joy_service.get_topic())
+        joy_rate = _to_float(settings.value("joy/rate_hz", self._joy_service.get_rate_hz()),
+                             self._joy_service.get_rate_hz())
+        joy_enabled = _to_bool(settings.value("joy/enabled", self._joy_service.is_enabled()),
+                               self._joy_service.is_enabled())
+        self._joy_service.set_topic(str(joy_topic))
+        self._joy_service.set_rate_hz(joy_rate)
+        self._joy_service.set_enabled(joy_enabled)
+
+        twist_topic = settings.value("twist/topic", self._twist_service.get_topic())
+        twist_rate = _to_float(settings.value("twist/rate_hz", self._twist_service.get_rate_hz()),
+                               self._twist_service.get_rate_hz())
+        twist_enabled = _to_bool(settings.value("twist/enabled", self._twist_service.is_enabled()),
+                                 self._twist_service.is_enabled())
+        use_stamped = _to_bool(settings.value("twist/use_stamped", self._twist_service.get_use_stamped()),
+                               self._twist_service.get_use_stamped())
+        holonomic = _to_bool(settings.value("twist/holonomic", self._twist_service.get_holonomic()),
+                             self._twist_service.get_holonomic())
+        linear_scale = _to_float(settings.value("twist/linear_scale", 1.0), 1.0)
+        angular_scale = _to_float(settings.value("twist/angular_scale", 1.0), 1.0)
+        self._twist_service.set_topic(str(twist_topic))
+        self._twist_service.set_rate_hz(twist_rate)
+        self._twist_service.set_enabled(twist_enabled)
+        self._twist_service.set_use_stamped(use_stamped)
+        self._twist_service.set_holonomic(holonomic)
+        self._twist_service.set_scales(linear_scale, angular_scale)
+
+        dead_zone = _to_float(settings.value("joystick/dead_zone", 0.0), 0.0)
+        dead_zone_x = _to_float(settings.value("joystick/dead_zone_x", 0.0), 0.0)
+        dead_zone_y = _to_float(settings.value("joystick/dead_zone_y", 0.0), 0.0)
+        expo_x = _to_float(settings.value("joystick/expo_x", 0.0), 0.0)
+        expo_y = _to_float(settings.value("joystick/expo_y", 0.0), 0.0)
+        return_mode_name = settings.value("joystick/return_mode", ReturnMode.BOTH.name)
+        sticky = _to_bool(settings.value("joystick/sticky_buttons", False), False)
+
+        self._joystick.set_dead_zone(dead_zone)
+        self._joystick.set_dead_zone_x(dead_zone_x)
+        self._joystick.set_dead_zone_y(dead_zone_y)
+        self._joystick.set_expo_x(expo_x)
+        self._joystick.set_expo_y(expo_y)
+        try:
+            self._config_api.set_return_mode(ReturnMode[str(return_mode_name)])
+        except KeyError:  # pragma: no cover - invalid persisted data
+            self._config_api.set_return_mode(ReturnMode.BOTH)
+        self._config_api.set_sticky_buttons(sticky)
+
+        joy_default = True  # Default collapsed state for panels
+        twist_default = True
+        joystick_default = True
+
+        joy_collapsed = _to_bool(settings.value("panels/joy_collapsed", joy_default), joy_default)
+        twist_collapsed = _to_bool(settings.value("panels/twist_collapsed", twist_default), twist_default)
+        joystick_collapsed = _to_bool(settings.value("panels/joystick_collapsed", joystick_default), joystick_default)
+        self._joy_panel.set_collapsed(joy_collapsed)
+        self._twist_panel.set_collapsed(twist_collapsed)
+        self._joystick_panel.set_collapsed(joystick_collapsed)
+
+        # Complete the initial setup of publishers after all settings are applied
+        if hasattr(self._twist_service, 'complete_initial_setup'):
+            self._twist_service.complete_initial_setup()
+
+        self._refresh_panels()
+
+    def _refresh_panels(self) -> None:
+        self._joy_panel.refresh()
+        self._twist_panel.refresh()
+        self._joystick_panel.refresh()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def shutdown(self) -> None:
+        self._joy_service.shutdown()
+        self._twist_service.shutdown()
+        if self._shift_handler is not None:
+            self._shift_handler._cleanup()
+
+    def closeEvent(self, event) -> None:  # noqa: D401 - Qt signature
+        self.shutdown()
+        super().closeEvent(event)
