@@ -20,7 +20,7 @@ from python_qt_binding.QtWidgets import (
 )
 
 from .joystick_widget import ReturnMode
-from .segmented_toggle import SegmentedToggle
+from .widgets.segmented_toggle_widget import SegmentedToggle
 
 
 _QT_MAX_SIZE = 16777215
