@@ -197,9 +197,10 @@ class _JoystickConfigAdapter:
 class _HolonomicShiftHandler(QObject):
     """Temporarily force holonomic mode while Shift is held."""
 
-    def __init__(self, twist_service: TwistPublisherService, parent: QWidget) -> None:
+    def __init__(self, twist_service: TwistPublisherService, twist_panel, parent: QWidget) -> None:
         super().__init__(parent)
         self._twist_service = twist_service
+        self._twist_panel = twist_panel
         self._last_value = twist_service.get_holonomic()
         self._active = False
 
@@ -210,28 +211,25 @@ class _HolonomicShiftHandler(QObject):
         parent.destroyed.connect(self._cleanup)
 
     def eventFilter(self, obj, event):  # noqa: D401 - Qt signature
-        if event.type() in (QEvent.KeyPress, QEvent.KeyRelease):
-            is_shift = False
-            if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Shift:
-                is_shift = True
-            elif event.type() == QEvent.KeyRelease and event.key() == Qt.Key_Shift:
-                is_shift = False
-            else:
-                modifiers = event.modifiers() if hasattr(event, "modifiers") else Qt.NoModifier
-                is_shift = bool(modifiers & Qt.ShiftModifier)
-
-            if is_shift != self._active:
-                self._toggle(is_shift)
+        if event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Shift and not self._active:
+                self._toggle(True)
+        elif event.type() == QEvent.KeyRelease:
+            if event.key() == Qt.Key_Shift and self._active:
+                self._toggle(False)
         return False
 
     def _toggle(self, enabled: bool) -> None:
         if enabled:
             self._last_value = self._twist_service.get_holonomic()
             self._twist_service.set_holonomic(True)
+            # Update UI to show temporary holonomic state
+            self._twist_panel.refresh()
         else:
             self._twist_service.set_holonomic(self._last_value)
+            # Restore UI to show actual holonomic state
+            self._twist_panel.refresh()
         self._active = enabled
-
     def _cleanup(self) -> None:
         if self._app is not None:
             self._app.removeEventFilter(self)
@@ -261,7 +259,7 @@ class JoystickMainWidget(QWidget):
         self._build_ui()
         self._connect_signals()
 
-        self._shift_handler = _HolonomicShiftHandler(self._twist_service, self)
+        self._shift_handler = _HolonomicShiftHandler(self._twist_service, self._twist_panel, self)
 
         self.setWindowTitle("Virtual Joystick")
         self.setFocusPolicy(Qt.StrongFocus)
