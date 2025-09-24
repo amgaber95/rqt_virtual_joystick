@@ -17,7 +17,7 @@ from python_qt_binding.QtWidgets import (
 from rclpy.node import Node
 
 from .control_panels import JoyOutputPanel, JoystickConfigPanel, TwistOutputPanel
-from .controller_buttons_widget import ControllerButtonsWidget
+from .widgets.controller_buttons_widget import ControllerButtonsWidget
 from .joy_publisher import JoyPublisherService
 from .widgets.joystick_widget import JoystickWidget, ReturnMode
 from .twist_publisher import TwistPublisherService
