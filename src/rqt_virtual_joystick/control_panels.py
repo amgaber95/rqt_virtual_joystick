@@ -19,7 +19,7 @@ from python_qt_binding.QtWidgets import (
     QWidget,
 )
 
-from .joystick_widget import ReturnMode
+from .widgets.joystick_widget import ReturnMode
 from .widgets.segmented_toggle_widget import SegmentedToggle
 
 
