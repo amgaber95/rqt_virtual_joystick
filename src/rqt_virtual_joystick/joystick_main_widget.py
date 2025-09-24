@@ -18,9 +18,9 @@ from rclpy.node import Node
 
 from .control_panels import JoyOutputPanel, JoystickConfigPanel, TwistOutputPanel
 from .widgets.controller_buttons_widget import ControllerButtonsWidget
-from .joy_publisher import JoyPublisherService
+from .publishers.joy_publisher import JoyPublisherService
 from .widgets.joystick_widget import JoystickWidget, ReturnMode
-from .twist_publisher import TwistPublisherService
+from .publishers.twist_publisher import TwistPublisherService
 
 
 def _to_bool(value, default: bool) -> bool:
