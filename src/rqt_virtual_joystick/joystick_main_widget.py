@@ -11,6 +11,7 @@ from python_qt_binding.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QSizePolicy,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -234,6 +235,33 @@ class _HolonomicShiftHandler(QObject):
         if self._app is not None:
             self._app.removeEventFilter(self)
         self._app = None
+
+
+class DynamicTabWidget(QTabWidget):
+    """Tab widget whose size hints follow the current page.
+
+    By default QTabWidget reports the max(min/sizeHint) of all pages, which
+    prevents shrinking on lightweight tabs. Overriding the hints makes the
+    container track the active page instead.
+    """
+
+    def minimumSizeHint(self):
+        page = self.currentWidget()
+        if page is not None:
+            try:
+                return page.minimumSizeHint()
+            except Exception:
+                pass
+        return super().minimumSizeHint()
+
+    def sizeHint(self):
+        page = self.currentWidget()
+        if page is not None:
+            try:
+                return page.sizeHint()
+            except Exception:
+                pass
+        return super().sizeHint()
 
 
 class JoystickMainWidget(QWidget):
