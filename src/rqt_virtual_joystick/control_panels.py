@@ -5,7 +5,6 @@ from typing import Optional, Protocol, Tuple
 
 from python_qt_binding.QtCore import Qt, QSize, pyqtSlot
 from python_qt_binding.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
@@ -346,8 +345,8 @@ class TwistOutputPanel(_ControlPanel):
             self._twist_publish_toggle.setChecked(enabled)
 
         use_stamped = self._api.get_use_stamped()
-        with blocked(self._twist_stamped_checkbox):
-            self._twist_stamped_checkbox.setChecked(use_stamped)
+        with blocked(self._twist_stamped_toggle):
+            self._twist_stamped_toggle.setChecked(use_stamped)
 
         rate = max(0, int(round(self._api.get_rate_hz())))
         with blocked(self._twist_rate_slider):
@@ -361,8 +360,8 @@ class TwistOutputPanel(_ControlPanel):
             self._twist_angular_spin.setValue(angular)
 
         holonomic = self._api.get_holonomic()
-        with blocked(self._twist_holonomic_checkbox):
-            self._twist_holonomic_checkbox.setChecked(holonomic)
+        with blocked(self._twist_holonomic_toggle):
+            self._twist_holonomic_toggle.setChecked(holonomic)
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
@@ -380,8 +379,10 @@ class TwistOutputPanel(_ControlPanel):
 
         row += 1
         layout.addWidget(self._label("Stamp Header:"), row, 0)
-        self._twist_stamped_checkbox = QCheckBox()
-        layout.addWidget(self._twist_stamped_checkbox, row, 1)
+        self._twist_stamped_toggle = SegmentedToggle(false_label="No", true_label="Yes")
+        with blocked(self._twist_stamped_toggle):
+            self._twist_stamped_toggle.setChecked(False)
+        layout.addWidget(self._twist_stamped_toggle, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
 
         row += 1
@@ -424,8 +425,10 @@ class TwistOutputPanel(_ControlPanel):
         holonomic_layout.setContentsMargins(0, 0, 0, 0)
         holonomic_layout.setSpacing(4)
         holonomic_layout.addWidget(self._label("Holonomic:"))
-        self._twist_holonomic_checkbox = QCheckBox()
-        holonomic_layout.addWidget(self._twist_holonomic_checkbox)
+        self._twist_holonomic_toggle = SegmentedToggle(false_label="Off", true_label="On")
+        with blocked(self._twist_holonomic_toggle):
+            self._twist_holonomic_toggle.setChecked(False)
+        holonomic_layout.addWidget(self._twist_holonomic_toggle)
         hint = QLabel("Hold Shift to temporarily enable")
         hint.setStyleSheet("color: #a0a0a0; font-size: 11px;")
         holonomic_layout.addWidget(hint)
@@ -437,7 +440,7 @@ class TwistOutputPanel(_ControlPanel):
 
     def _wire(self) -> None:
         self._twist_publish_toggle.toggled.connect(self._api.set_enabled)
-        self._twist_stamped_checkbox.toggled.connect(self._api.set_use_stamped)
+        self._twist_stamped_toggle.toggled.connect(self._api.set_use_stamped)
         self._twist_topic_combo.activated[str].connect(self._on_topic_activated)
         topic_line_edit = self._twist_topic_combo.lineEdit()
         if topic_line_edit:
@@ -445,7 +448,7 @@ class TwistOutputPanel(_ControlPanel):
         self._twist_rate_slider.valueChanged.connect(self._on_rate_changed)
         self._twist_linear_spin.valueChanged.connect(self._on_linear_changed)
         self._twist_angular_spin.valueChanged.connect(self._on_angular_changed)
-        self._twist_holonomic_checkbox.toggled.connect(self._api.set_holonomic)
+        self._twist_holonomic_toggle.toggled.connect(self._api.set_holonomic)
 
     @pyqtSlot(str)
     def _on_topic_activated(self, topic: str) -> None:
@@ -514,8 +517,8 @@ class JoystickConfigPanel(_ControlPanel):
             self._return_mode_combo.setCurrentIndex(index)
 
         sticky = self._api.get_sticky_buttons()
-        with blocked(self._sticky_buttons_checkbox):
-            self._sticky_buttons_checkbox.setChecked(sticky)
+        with blocked(self._sticky_buttons_toggle):
+            self._sticky_buttons_toggle.setChecked(sticky)
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
@@ -567,8 +570,10 @@ class JoystickConfigPanel(_ControlPanel):
 
         row += 1
         layout.addWidget(self._label("Sticky Buttons:"), row, 0)
-        self._sticky_buttons_checkbox = QCheckBox()
-        layout.addWidget(self._sticky_buttons_checkbox, row, 1)
+        self._sticky_buttons_toggle = SegmentedToggle(false_label="Off", true_label="On")
+        with blocked(self._sticky_buttons_toggle):
+            self._sticky_buttons_toggle.setChecked(False)
+        layout.addWidget(self._sticky_buttons_toggle, row, 1)
         layout.addWidget(self._placeholder(), row, 2)
 
         self._body_layout.addLayout(layout)
@@ -580,7 +585,7 @@ class JoystickConfigPanel(_ControlPanel):
         self._expo_x_row.slider().valueChanged.connect(self._on_expo_x_changed)
         self._expo_y_row.slider().valueChanged.connect(self._on_expo_y_changed)
         self._return_mode_combo.currentIndexChanged.connect(self._on_return_mode_changed)
-        self._sticky_buttons_checkbox.toggled.connect(self._on_sticky_buttons_changed)
+        self._sticky_buttons_toggle.toggled.connect(self._on_sticky_buttons_changed)
 
     @pyqtSlot(int)
     def _on_dead_zone_changed(self, value: int) -> None:
