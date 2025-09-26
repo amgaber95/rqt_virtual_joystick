@@ -98,14 +98,8 @@ class JoystickConfigAPI(Protocol):
 
 
 class _ControlPanel(QFrame):
-    LABEL_MIN_WIDTH = 90
-    VALUE_PLACEHOLDER_WIDTH = 40
-
     def __init__(self, title: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self._label_min_width = self.LABEL_MIN_WIDTH
-        self._value_placeholder_width = self.VALUE_PLACEHOLDER_WIDTH
-
         self.setObjectName("control-panel")
 
         self._header_button = QToolButton(self)
@@ -157,19 +151,12 @@ class _ControlPanel(QFrame):
 
     def _label(self, text: str) -> QLabel:
         label = QLabel(text)
-        label.setMinimumWidth(self._label_min_width)
         return label
 
     def _value_label(self, text: str = "") -> QLabel:
         label = QLabel(text)
-        label.setFixedWidth(self._value_placeholder_width)
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         return label
-
-    def _placeholder(self) -> QLabel:
-        placeholder = QLabel("")
-        placeholder.setFixedWidth(self._value_placeholder_width)
-        return placeholder
 
     def _apply_frame_style(self) -> None:
         self.setFrameShape(QFrame.NoFrame)
@@ -255,20 +242,19 @@ class JoyOutputPanel(_ControlPanel):
             self._rate_slider.setValue(rate)
         self._rate_label.setText(f"{rate} Hz")
 
-    # Backwards compatibility for old code
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setVerticalSpacing(5)
-        layout.setColumnStretch(0, 0)
-        layout.setColumnStretch(1, 1)
-        layout.setColumnStretch(2, 0)
+        # layout.setContentsMargins(0, 0, 0, 0)
+        layout.setVerticalSpacing(4)
+        # layout.setColumnStretch(0, 0)
+        # layout.setColumnStretch(1, 1)
+        # layout.setColumnStretch(2, 0)
 
         row = 0
         layout.addWidget(self._label("Publish:"), row, 0)
         self._publish_toggle = SegmentedToggle(false_label="Disabled", true_label="Enabled")
-        layout.addWidget(self._publish_toggle, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
+        layout.addWidget(self._publish_toggle, row, 1, 1, 2)
+        # layout.addWidget(self._placeholder(), row, 2)
 
         row += 1
         layout.addWidget(self._label("Topic:"), row, 0)
@@ -276,8 +262,8 @@ class JoyOutputPanel(_ControlPanel):
         self._topic_combo.setEditable(True)
         self._topic_combo.addItems(["joy", "teleop/joy", "input/joy"])
         self._topic_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addWidget(self._topic_combo, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
+        layout.addWidget(self._topic_combo, row, 1, 1, 2)
+        # layout.addWidget(self._placeholder(), row, 2)
 
         row += 1
         layout.addWidget(self._label("Rate:"), row, 0)
@@ -365,33 +351,63 @@ class TwistOutputPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setVerticalSpacing(5)
-        layout.setColumnStretch(0, 0)
-        layout.setColumnStretch(1, 1)
-        layout.setColumnStretch(2, 0)
+        # layout.setContentsMargins(0, 0, 0, 0)
+        layout.setVerticalSpacing(4)
+        # layout.setColumnStretch(0, 0)
+        # layout.setColumnStretch(1, 1)
+        # layout.setColumnStretch(2, 0)
 
         row = 0
         layout.addWidget(self._label("Publish:"), row, 0)
         self._twist_publish_toggle = SegmentedToggle(false_label="Disabled", true_label="Enabled")
-        layout.addWidget(self._twist_publish_toggle, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
+        layout.addWidget(self._twist_publish_toggle, row, 1, 1, 2)
+        # layout.addWidget(self._placeholder(), row, 2)
 
         row += 1
-        layout.addWidget(self._label("Stamp Header:"), row, 0)
+        layout.addWidget(self._label("Stamped:"), row, 0)
         self._twist_stamped_toggle = SegmentedToggle(false_label="No", true_label="Yes")
         with blocked(self._twist_stamped_toggle):
             self._twist_stamped_toggle.setChecked(False)
-        layout.addWidget(self._twist_stamped_toggle, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
+        layout.addWidget(self._twist_stamped_toggle, row, 1, 1, 2)
+        # layout.addWidget(self._placeholder(), row, 2)
+
+        row += 1
+        layout.addWidget(self._label("Holonomic:"), row, 0)
+        self._twist_holonomic_toggle = SegmentedToggle(false_label="Off", true_label="On")
+        # self._twist_holonomic_toggle.setMaximumWidth(80)
+        with blocked(self._twist_holonomic_toggle):
+            self._twist_holonomic_toggle.setChecked(False)
+        layout.addWidget(self._twist_holonomic_toggle, row, 1, 1, 2)
+        # hint = QLabel("Hold Shift")
+        # hint.setStyleSheet("color: #a0a0a0; font-size: 11px;")
+        # layout.addWidget(hint, row, 2)
 
         row += 1
         layout.addWidget(self._label("Topic:"), row, 0)
         self._twist_topic_combo = QComboBox()
         self._twist_topic_combo.setEditable(True)
         self._twist_topic_combo.addItems(["cmd_vel", "robot/cmd_vel", "teleop/cmd_vel"])
-        layout.addWidget(self._twist_topic_combo, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
+        layout.addWidget(self._twist_topic_combo, row, 1, 1, 2)
+        # layout.addWidget(self._placeholder(), row, 2)
+
+        row += 1
+        layout.addWidget(self._label("Linear:"), row, 0)
+        self._twist_linear_spin = QDoubleSpinBox()
+        self._twist_linear_spin.setRange(0.0, 10.0)
+        self._twist_linear_spin.setDecimals(3)
+        self._twist_linear_spin.setSingleStep(0.1)
+        layout.addWidget(self._twist_linear_spin, row, 1, 1, 2)
+        # layout.addWidget(self._placeholder(), row, 2)
+
+        row += 1
+        layout.addWidget(self._label("Angular:"), row, 0)
+        self._twist_angular_spin = QDoubleSpinBox()
+        self._twist_angular_spin.setRange(0.0, 10.0)
+        self._twist_angular_spin.setDecimals(3)
+        self._twist_angular_spin.setSingleStep(0.1)
+        layout.addWidget(self._twist_angular_spin, row, 1, 1, 2)
+        # layout.addWidget(self._placeholder(), row, 2)
+
 
         row += 1
         layout.addWidget(self._label("Rate:"), row, 0)
@@ -400,41 +416,6 @@ class TwistOutputPanel(_ControlPanel):
         layout.addWidget(self._twist_rate_slider, row, 1)
         self._twist_rate_label = self._value_label()
         layout.addWidget(self._twist_rate_label, row, 2)
-
-        row += 1
-        layout.addWidget(self._label("Linear Scale:"), row, 0)
-        self._twist_linear_spin = QDoubleSpinBox()
-        self._twist_linear_spin.setRange(0.0, 10.0)
-        self._twist_linear_spin.setDecimals(3)
-        self._twist_linear_spin.setSingleStep(0.1)
-        layout.addWidget(self._twist_linear_spin, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
-
-        row += 1
-        layout.addWidget(self._label("Angular Scale:"), row, 0)
-        self._twist_angular_spin = QDoubleSpinBox()
-        self._twist_angular_spin.setRange(0.0, 10.0)
-        self._twist_angular_spin.setDecimals(3)
-        self._twist_angular_spin.setSingleStep(0.1)
-        layout.addWidget(self._twist_angular_spin, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
-
-        row += 1
-        holonomic_container = QWidget()
-        holonomic_layout = QHBoxLayout()
-        holonomic_layout.setContentsMargins(0, 0, 0, 0)
-        holonomic_layout.setSpacing(4)
-        holonomic_layout.addWidget(self._label("Holonomic:"))
-        self._twist_holonomic_toggle = SegmentedToggle(false_label="Off", true_label="On")
-        with blocked(self._twist_holonomic_toggle):
-            self._twist_holonomic_toggle.setChecked(False)
-        holonomic_layout.addWidget(self._twist_holonomic_toggle)
-        hint = QLabel("Hold Shift to temporarily enable")
-        hint.setStyleSheet("color: #a0a0a0; font-size: 11px;")
-        holonomic_layout.addWidget(hint)
-        holonomic_layout.addStretch(1)
-        holonomic_container.setLayout(holonomic_layout)
-        layout.addWidget(holonomic_container, row, 0, 1, 3)
 
         self._body_layout.addLayout(layout)
 
@@ -522,26 +503,43 @@ class JoystickConfigPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setVerticalSpacing(5)
-        layout.setColumnStretch(0, 0)
-        layout.setColumnStretch(1, 1)
-        layout.setColumnStretch(2, 0)
+        # layout.setContentsMargins(2,2,2,2)
+        layout.setVerticalSpacing(4)
+        # layout.setColumnStretch(0, 0)
+        # layout.setColumnStretch(1, 1)
+        # layout.setColumnStretch(2, 0)
 
         row = 0
-        layout.addWidget(self._label("Dead Zone:"), row, 0)
+        layout.addWidget(self._label("Sticky?:"), row, 0)
+        self._sticky_buttons_toggle = SegmentedToggle(false_label="Off", true_label="On")
+        with blocked(self._sticky_buttons_toggle):
+            self._sticky_buttons_toggle.setChecked(False)
+        layout.addWidget(self._sticky_buttons_toggle, row, 1, 1, 2)
+
+        row += 1
+        layout.addWidget(self._label("R Mode:"), row, 0)
+        self._return_mode_combo = QComboBox()
+        self._return_mode_combo.addItem("Both Axes", ReturnMode.BOTH)
+        self._return_mode_combo.addItem("X Only", ReturnMode.HORIZONTAL)
+        self._return_mode_combo.addItem("Y Only", ReturnMode.VERTICAL)
+        self._return_mode_combo.addItem("Disabled", ReturnMode.NONE)
+        layout.addWidget(self._return_mode_combo, row, 1, 1, 2)
+
+        row += 1
+        layout.addWidget(self._sticky_buttons_toggle, row, 1, 1, 2)
+        layout.addWidget(self._label("Dead Z:"), row, 0)
         self._dead_zone_row = SliderRow(self, 0, 90, suffix=" %")
         layout.addWidget(self._dead_zone_row.slider(), row, 1)
         layout.addWidget(self._dead_zone_row.label(), row, 2)
 
         row += 1
-        layout.addWidget(self._label("Dead Zone X:"), row, 0)
+        layout.addWidget(self._label("Dead X:"), row, 0)
         self._dead_zone_x_row = SliderRow(self, 0, 90, suffix=" %")
         layout.addWidget(self._dead_zone_x_row.slider(), row, 1)
         layout.addWidget(self._dead_zone_x_row.label(), row, 2)
 
         row += 1
-        layout.addWidget(self._label("Dead Zone Y:"), row, 0)
+        layout.addWidget(self._label("Dead Y:"), row, 0)
         self._dead_zone_y_row = SliderRow(self, 0, 90, suffix=" %")
         layout.addWidget(self._dead_zone_y_row.slider(), row, 1)
         layout.addWidget(self._dead_zone_y_row.label(), row, 2)
@@ -557,24 +555,6 @@ class JoystickConfigPanel(_ControlPanel):
         self._expo_y_row = SliderRow(self, 0, 100, suffix=" %")
         layout.addWidget(self._expo_y_row.slider(), row, 1)
         layout.addWidget(self._expo_y_row.label(), row, 2)
-
-        row += 1
-        layout.addWidget(self._label("Auto Return:"), row, 0)
-        self._return_mode_combo = QComboBox()
-        self._return_mode_combo.addItem("Both Axes", ReturnMode.BOTH)
-        self._return_mode_combo.addItem("X Only", ReturnMode.HORIZONTAL)
-        self._return_mode_combo.addItem("Y Only", ReturnMode.VERTICAL)
-        self._return_mode_combo.addItem("Disabled", ReturnMode.NONE)
-        layout.addWidget(self._return_mode_combo, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
-
-        row += 1
-        layout.addWidget(self._label("Sticky Buttons:"), row, 0)
-        self._sticky_buttons_toggle = SegmentedToggle(false_label="Off", true_label="On")
-        with blocked(self._sticky_buttons_toggle):
-            self._sticky_buttons_toggle.setChecked(False)
-        layout.addWidget(self._sticky_buttons_toggle, row, 1)
-        layout.addWidget(self._placeholder(), row, 2)
 
         self._body_layout.addLayout(layout)
 

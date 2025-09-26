@@ -97,10 +97,10 @@ class ControllerButton(QAbstractButton):
     # ------------------------------------------------------------------
 
     def sizeHint(self) -> QSize:  # type: ignore[override]
-        return QSize(56, 56)
+        return QSize(45, 45)
 
     def minimumSizeHint(self) -> QSize:  # type: ignore[override]
-        return QSize(40, 40)
+        return QSize(30, 30)
 
     def nextCheckState(self) -> None:  # type: ignore[override]
         # Qt toggles on release; skip automatic toggle in momentary mode.
@@ -280,9 +280,17 @@ class ControllerButtonsWidget(QWidget):
             button = ControllerButton(btn_id, self)
             button.setText(LABELS[btn_id])
             button.toggled.connect(lambda checked, b=btn_id: self._on_button_toggled(b, checked))
-            self._layout.addWidget(button, row, column, Qt.AlignCenter)
+
+            if btn_id == GameButton.B:
+                self._layout.addWidget(button, row, column, Qt.AlignLeft)
+            elif btn_id == GameButton.X:
+                self._layout.addWidget(button, row, column, Qt.AlignRight)
+            elif btn_id == GameButton.Y:
+                self._layout.addWidget(button, row, column, Qt.AlignHCenter)
+            elif btn_id == GameButton.A:
+                self._layout.addWidget(button, row, column, Qt.AlignHCenter)
             self._buttons[btn_id] = button
-        self.setMinimumSize(180, 180)
+        self.setMinimumSize(200, 200)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
     def paintEvent(self, event) -> None:  # type: ignore[override]

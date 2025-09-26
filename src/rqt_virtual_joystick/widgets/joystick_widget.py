@@ -215,7 +215,7 @@ class JoystickWidget(QWidget):
         self._pressed = False
         self._handle_radius = 12
         
-        self.setFixedSize(220, 220)
+        self.setFixedSize(200, 200)
         self.setFocusPolicy(Qt.StrongFocus)
         
         self._timer = QTimer(self)
