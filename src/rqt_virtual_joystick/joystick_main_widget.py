@@ -338,7 +338,11 @@ class JoystickMainWidget(QWidget):
         joy_panels_layout.setSpacing(8)
         joy_panels_layout.addWidget(self._joy_panel)
         joy_panels_layout.addWidget(self._joystick_panel)
-        joy_panels_layout.addStretch(1)
+        joy_panels_layout.addStretch(1)  
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        spacer.setMinimumHeight(20)
+        joy_panels_layout.addWidget(spacer)
         
         # Store the layout for moving config panel later
         self._joy_panels_layout = joy_panels_layout
@@ -381,6 +385,10 @@ class JoystickMainWidget(QWidget):
         twist_panels_layout.setSpacing(8)
         twist_panels_layout.addWidget(self._twist_panel)
         twist_panels_layout.addStretch(1)  # Config panel will be inserted at position 1
+        spacer2 = QWidget()
+        spacer2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        spacer2.setMinimumHeight(20)
+        twist_panels_layout.addWidget(spacer2)
         
         # Store the layout for moving config panel here
         self._twist_panels_layout = twist_panels_layout
@@ -431,7 +439,7 @@ class JoystickMainWidget(QWidget):
             self._twist_top_layout.addStretch(1)
             # Move config panel to Twist layout
             self._joystick_panel.setParent(None)
-            self._twist_panels_layout.insertWidget(1, self._joystick_panel)
+            self._twist_panels_layout.insertWidget(1, self._joystick_panel)    
         # Let layouts recompute using the current tab's hints
         try:
             self._tab_widget.updateGeometry()
