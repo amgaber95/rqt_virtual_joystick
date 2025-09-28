@@ -11,6 +11,7 @@ from python_qt_binding.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QSizePolicy,
     QSlider,
     QToolButton,
@@ -101,6 +102,8 @@ class _ControlPanel(QFrame):
     def __init__(self, title: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setObjectName("control-panel")
+        # Prefer to take minimal vertical space when squeezed
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self._header_button = QToolButton(self)
         self._header_button.setObjectName("control-panel-toggle")
@@ -129,11 +132,13 @@ class _ControlPanel(QFrame):
         # self._body_layout.setContentsMargins(0, 0, 0, 0)
         self._body_layout.setSpacing(12)
         self._body_widget.setLayout(self._body_layout)
-        # self._body_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Body should not greedily expand vertically by default
+        self._body_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         outer_layout = QVBoxLayout()
         outer_layout.setContentsMargins(10, 10, 10, 10)
         outer_layout.setSpacing(6)
+        outer_layout.setSizeConstraint(QLayout.SetMinimumSize)
         outer_layout.addLayout(header_layout)
         outer_layout.addWidget(self._separator)
         outer_layout.addWidget(self._body_widget)
@@ -244,7 +249,7 @@ class JoyOutputPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        # layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setVerticalSpacing(4)
         # layout.setColumnStretch(0, 0)
         # layout.setColumnStretch(1, 1)
@@ -351,7 +356,7 @@ class TwistOutputPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        # layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setVerticalSpacing(4)
         # layout.setColumnStretch(0, 0)
         # layout.setColumnStretch(1, 1)
@@ -503,15 +508,13 @@ class JoystickConfigPanel(_ControlPanel):
 
     def _build_ui(self) -> None:
         layout = QGridLayout()
-        # layout.setContentsMargins(2,2,2,2)
-        layout.setVerticalSpacing(4)
-        # layout.setColumnStretch(0, 0)
-        # layout.setColumnStretch(1, 1)
-        # layout.setColumnStretch(2, 0)
+        layout.setContentsMargins(5 , 0, 5, 0)
+        layout.setVerticalSpacing(8)
 
         row = 0
         layout.addWidget(self._label("Sticky?:"), row, 0)
         self._sticky_buttons_toggle = SegmentedToggle(false_label="Off", true_label="On")
+        layout.addWidget(self._sticky_buttons_toggle, row, 1, 1, 2)
         with blocked(self._sticky_buttons_toggle):
             self._sticky_buttons_toggle.setChecked(False)
         layout.addWidget(self._sticky_buttons_toggle, row, 1, 1, 2)
@@ -526,7 +529,6 @@ class JoystickConfigPanel(_ControlPanel):
         layout.addWidget(self._return_mode_combo, row, 1, 1, 2)
 
         row += 1
-        layout.addWidget(self._sticky_buttons_toggle, row, 1, 1, 2)
         layout.addWidget(self._label("Dead Z:"), row, 0)
         self._dead_zone_row = SliderRow(self, 0, 90, suffix=" %")
         layout.addWidget(self._dead_zone_row.slider(), row, 1)

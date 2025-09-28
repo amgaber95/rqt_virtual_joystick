@@ -10,6 +10,7 @@ from python_qt_binding.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
+    QLayout,
     QSizePolicy,
     QTabWidget,
     QVBoxLayout,
@@ -298,39 +299,106 @@ class JoystickMainWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        top_row = QWidget()
-        top_layout = QHBoxLayout(top_row)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(12)
-
+        # Create tab widget
+        self._tab_widget = DynamicTabWidget()
+        self._tab_widget.currentChanged.connect(self._on_tab_changed)
+        
+        # ===== JOY TAB =====
+        joy_tab = QWidget()
+        joy_layout = QVBoxLayout(joy_tab)
+        joy_layout.setContentsMargins(8, 8, 8, 8)
+        joy_layout.setSpacing(12)
+        joy_layout.setSizeConstraint(QLayout.SetMinimumSize)
+        
+        # Top row: Joystick + Buttons
+        joy_top_row = QWidget()
+        joy_top_layout = QHBoxLayout(joy_top_row)
+        joy_top_layout.setContentsMargins(0, 0, 0, 0)
+        joy_top_layout.setSpacing(12)
+        
         self._joystick.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        top_layout.addWidget(self._joystick, 3)
-
-        self._buttons.setMinimumWidth(220)
-        self._buttons.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        top_layout.addWidget(self._buttons, 1)
-
-        top_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-        panels_frame = QFrame()
-        panels_frame.setFrameShape(QFrame.NoFrame)
-        panels_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-        panels_layout = QVBoxLayout(panels_frame)
-        panels_layout.setContentsMargins(0, 0, 0, 0)
-        panels_layout.setSpacing(8)
-        panels_layout.addWidget(self._joy_panel)
-        panels_layout.addWidget(self._twist_panel)
-        panels_layout.addWidget(self._joystick_panel)
-        panels_layout.addStretch(1)
-
+        joy_top_layout.addWidget(self._joystick, 3)
+        
+        # self._buttons.setMinimumWidth(220)
+        # self._buttons.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        joy_top_layout.addWidget(self._buttons, 1)
+        
+        joy_top_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        # Store the layout for moving joystick later
+        self._joy_top_layout = joy_top_layout
+        
+        # Bottom panels: Joy Output + Joystick Config
+        joy_panels_frame = QFrame()
+        joy_panels_frame.setFrameShape(QFrame.NoFrame)
+        joy_panels_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        joy_panels_layout = QVBoxLayout(joy_panels_frame)
+        joy_panels_layout.setContentsMargins(0, 0, 0, 0)
+        joy_panels_layout.setSpacing(8)
+        joy_panels_layout.addWidget(self._joy_panel)
+        joy_panels_layout.addWidget(self._joystick_panel)
+        joy_panels_layout.addStretch(1)
+        
+        # Store the layout for moving config panel later
+        self._joy_panels_layout = joy_panels_layout
+        
+        joy_layout.addWidget(joy_top_row)
+        joy_layout.addWidget(joy_panels_frame)
+        joy_layout.setStretchFactor(joy_top_row, 0)
+        joy_layout.setStretchFactor(joy_panels_frame, 1)
+        
+        # ===== TWIST TAB =====
+        twist_tab = QWidget()
+        twist_layout = QVBoxLayout(twist_tab)
+        twist_layout.setContentsMargins(8, 8, 8, 8)
+        twist_layout.setSpacing(12)
+        twist_layout.setSizeConstraint(QLayout.SetMinimumSize)
+        
+        # Top row: Centered Joystick (will be moved here when switching tabs)
+        twist_top_row = QWidget()
+        twist_top_layout = QHBoxLayout(twist_top_row)
+        twist_top_layout.setContentsMargins(0, 0, 0, 0)
+        twist_top_layout.setSpacing(12)
+        
+        # Placeholder - joystick will be added when switching to this tab
+        twist_top_layout.addStretch(1)
+        twist_top_layout.addStretch(3)  # Space for joystick
+        twist_top_layout.addStretch(1)
+        
+        twist_top_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        # Store the layout for moving joystick here
+        self._twist_top_layout = twist_top_layout
+        
+        # Bottom panels: Twist Output + Joystick Config
+        twist_panels_frame = QFrame()
+        twist_panels_frame.setFrameShape(QFrame.NoFrame)
+        twist_panels_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        twist_panels_layout = QVBoxLayout(twist_panels_frame)
+        twist_panels_layout.setContentsMargins(0, 0, 0, 0)
+        twist_panels_layout.setSpacing(8)
+        twist_panels_layout.addWidget(self._twist_panel)
+        twist_panels_layout.addStretch(1)  # Config panel will be inserted at position 1
+        
+        # Store the layout for moving config panel here
+        self._twist_panels_layout = twist_panels_layout
+        
+        twist_layout.addWidget(twist_top_row)
+        twist_layout.addWidget(twist_panels_frame)
+        twist_layout.setStretchFactor(twist_top_row, 0)
+        twist_layout.setStretchFactor(twist_panels_frame, 1)
+        
+        # Add tabs
+        self._tab_widget.addTab(joy_tab, "Joy")
+        self._tab_widget.addTab(twist_tab, "Twist")
+        
+        # Root layout
         root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(8, 8, 8, 8)
-        root_layout.setSpacing(12)
-        root_layout.addWidget(top_row)
-        root_layout.addWidget(panels_frame)
-        root_layout.setStretchFactor(top_row, 0)
-        root_layout.setStretchFactor(panels_frame, 1)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        root_layout.addWidget(self._tab_widget)
 
     def _connect_signals(self) -> None:
         self._joystick.position_changed.connect(self._on_joystick_position)
@@ -339,6 +407,38 @@ class JoystickMainWidget(QWidget):
     def _on_joystick_position(self, x: float, y: float) -> None:
         self._joy_service.update_axes(x, y)
         self._twist_service.update_from_axes(x, y)
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Move joystick and config panel to the active tab."""
+        if index == 0:  # Joy tab
+            # Move joystick to Joy layout (with buttons)
+            self._joystick.setParent(None)
+            self._joy_top_layout.insertWidget(0, self._joystick, 3)
+            # Move config panel to Joy layout
+            self._joystick_panel.setParent(None)
+            self._joy_panels_layout.insertWidget(1, self._joystick_panel)
+        elif index == 1:  # Twist tab
+            # Move joystick to Twist layout (centered)
+            self._joystick.setParent(None)
+            # Clear the placeholder stretches
+            while self._twist_top_layout.count() > 0:
+                item = self._twist_top_layout.takeAt(0)
+                if item.widget():
+                    item.widget().setParent(None)
+            # Add with centering stretches
+            self._twist_top_layout.addStretch(1)
+            self._twist_top_layout.addWidget(self._joystick, 3)
+            self._twist_top_layout.addStretch(1)
+            # Move config panel to Twist layout
+            self._joystick_panel.setParent(None)
+            self._twist_panels_layout.insertWidget(1, self._joystick_panel)
+        # Let layouts recompute using the current tab's hints
+        try:
+            self._tab_widget.updateGeometry()
+            self.updateGeometry()
+            self.adjustSize()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Settings persistence
@@ -373,6 +473,7 @@ class JoystickMainWidget(QWidget):
         settings.set_value("panels/joy_collapsed", self._joy_panel.is_collapsed())
         settings.set_value("panels/twist_collapsed", self._twist_panel.is_collapsed())
         settings.set_value("panels/joystick_collapsed", self._joystick_panel.is_collapsed())
+        settings.set_value("ui/active_tab", self._tab_widget.currentIndex())
 
         if hasattr(settings, "sync"):
             settings.sync()
@@ -438,6 +539,11 @@ class JoystickMainWidget(QWidget):
         self._joy_panel.set_collapsed(joy_collapsed)
         self._twist_panel.set_collapsed(twist_collapsed)
         self._joystick_panel.set_collapsed(joystick_collapsed)
+
+        # Restore active tab
+        active_tab = int(settings.value("ui/active_tab", 0))
+        if 0 <= active_tab < self._tab_widget.count():
+            self._tab_widget.setCurrentIndex(active_tab)
 
         # Complete the initial setup of publishers after all settings are applied
         if hasattr(self._twist_service, 'complete_initial_setup'):

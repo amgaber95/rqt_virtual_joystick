@@ -290,7 +290,7 @@ class ControllerButtonsWidget(QWidget):
             elif btn_id == GameButton.A:
                 self._layout.addWidget(button, row, column, Qt.AlignHCenter)
             self._buttons[btn_id] = button
-        self.setMinimumSize(200, 200)
+        self.setFixedSize(200, 200)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
